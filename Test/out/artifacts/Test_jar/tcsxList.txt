@@ -1,0 +1,80 @@
+#==============================================================================
+# FileName     :  McsxList.txt
+# Description  :  start and stop for all MCSX service
+# Note         :
+#------------------------------------------------------------------------------
+#  (C) Copyright IBM Japan, Ltd. 2018, 2018
+#  (C) Copyright IBM Corp. 2018, 2018
+#------------------------------------------------------------------------------
+# Modification History:
+#
+#     Date      Ver    Name      Description
+#  ----------  ----  ----------  ----------------------------------------------
+#  2018/11/08  1.00  K.Ohnishi   initial release
+#
+#==============================================================================
+#
+# TAPTYPE   EQP TYPE
+# -------------- ----------------------- ------------
+#
+# EQP-ID         TAP-FILE                CONSOLE-PORT
+# -------------- ----------------------- ------------
+E_MCS_01    MCSX_MCS01.tap	     10101
+M_XMT_01    TCSX_BON_X01.tap         11401
+M_XMC_01    TCSX_DXL_X01.tap         11501
+M_WSD_09    TCSX_WSW_T01.tap         11009
+M_WSD_10    TCSX_WSW_T01.tap         11010
+M_WSD_12    TCSX_WSW_T01.tap         11012
+M_DMT_02    TCSX_ASC_A01.tap         11901
+M_BV1_01    TCSX_EDG_T01.tap  	     15401
+M_BV1_02    TCSX_EDG_T01.tap  	     15402
+M_BV2_01    TCSX_EDG_T01.tap         15501
+M_BV2_02    TCSX_EDG_T01.tap         15502
+M_BV2_03    TCSX_EDG_T01.tap         15503
+M_BV2_04    TCSX_EDG_T01.tap         15504
+E_LAP_01    TCSX_LAP_B01.tap         15901
+E_FTIR_01   TCSX_FTIR_NAN01.tap      13101
+E_RTO_01    TCSX_RTO_B01.tap         17801
+M_SSG_01    TCSX_SSG_D01.tap         15601
+M_SSG_02    TCSX_SSG_D01.tap         15602
+M_SSG_03    TCSX_SSG_D01.tap         15603
+M_SSG_04    TCSX_SSG_D01.tap         15604
+M_SSG_05    TCSX_SSG_D01.tap         15605
+M_TV1_01    TCSX_LBW_B01.tap         15801
+M_TV2_01    TCSX_LBW_B01.tap         15901
+M_LAC_01    TCSX_LAC_N01.tap         16201
+M_TV1_02    TCSX_WGT_A01.tap         16501
+M_EP0_01    TCSX_LEP_A01.tap         16801
+M_EP1_01    TCSX_LEP_A01.tap         16802 
+M_HLM_01    TCSX_SLM_S01.tap         17401
+M_DFM_01    TCSX_DFM_A01.tap         17501 
+M_ETC_01    TCSX_ETC_N01.tap         17601
+M_TV4_01    TCSX_RPW_K02.tap         18201
+M_DSC_01    TCSX_DPC_N01.tap         18801
+M_DSC_02    TCSX_DPC_H01.tap         18802
+M_TV5_01    TCSX_GTF_J01.tap         19101
+M_SO2_01    TCSX_WCG_G04.tap         19401
+M_EGP_01    TCSX_EDP_A01.tap         19501
+M_EP2_01    TCSX_LEP_B01.tap         19801
+M_CMP_01    TCSX_CMP_G32.tap         20201
+M_CMC_01    TCSX_CMC_S32.tap         20901
+
+M_FNC_03    TCSX_FNC_H04.tap         21001
+M_API_01    TCSX_PHL_C02.tap         21502
+M_TV6_05    TCSX_WS2_J02.tap         21705
+M_TV6_06    TCSX_WS2_J02.tap         21706
+M_TV3_01    TCSX_WGT_B01.tap         21901
+
+M_OP2_05    TCSX_AXM_A01.tap         22005
+M_OP2_06    TCSX_AXM_O01.tap         22006
+M_OP1_01    TCSX_AXM_A01.tap         22101
+
+M_FPI_01    TCSX_SP7_K01.tap         22301
+M_CCL_01    TCSX_FOC_X01.tap         23101
+M_CCL_02    TCSX_FPC_A01.tap         23102
+M_CCL_03    TCSX_FPC_A01.tap         23103
+M_SO4_01    TCSX_WCG_H04.tap         25201
+M_DSP_01    TCSX_DSP_K01.tap         18501
+M_EFM_01    TCSX_EFM_B01.tap         18601
+
+M_SO3_01    TCSX_SWG_G01.tap         22001
