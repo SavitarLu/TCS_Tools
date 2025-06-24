@@ -64,6 +64,7 @@ public class AixLogFinder extends JFrame {
 
     private JTextField tcsIdField; // 机台ID输入框
     private JTextField eqpStateField; // 机台ID输入框
+    private JTextField timesp; // 机台ID输入框
     private JList<String> tcsSuggestionList; // 机台ID备选列表
     private DefaultListModel<String> tcsSuggestionModel; // 备选列表数据模型
     private JPopupMenu tcsSuggestionPopup; // 备选菜单
@@ -81,6 +82,7 @@ public class AixLogFinder extends JFrame {
     private JSpinner dateSpinner; // 日期选择器
     private JFormattedTextField dateField; // 日期输入字段
     private JLabel dateLabel; // 日期标签
+    private JLabel timeLabel; // 日期标签
     public AixLogFinder(boolean isMES) {
         this.isMES = isMES; // 保存模式状态
         initComponents();
@@ -164,6 +166,7 @@ public class AixLogFinder extends JFrame {
         tcsSuggestionPopup.add(new JScrollPane(tcsSuggestionList));
 
         tcsIdField = new JTextField();
+
         connectTcsBtn = new JButton("连接TCS");
 
         eqpStatusDot = new JLabel();
@@ -181,7 +184,8 @@ public class AixLogFinder extends JFrame {
 
         // 初始化日期选择器
         dateLabel = new JLabel("日期:");
-
+        timeLabel = new JLabel("时间:");
+        timesp = new JTextField();
         // 创建日期格式
         SpinnerDateModel dateModel = new SpinnerDateModel(
                 new Date(),                   // 初始日期为当前日期
@@ -288,13 +292,6 @@ public class AixLogFinder extends JFrame {
         leftSplitPane = new JSplitPane(JSplitPane.VERTICAL_SPLIT, sessionPanel, sessionDetailsPanel);
         leftSplitPane.setDividerLocation(400);
 
-        // 搜索面板
-     //  JPanel searchPanel = new JPanel(new BorderLayout());
-     //  searchPanel.setBorder(BorderFactory.createTitledBorder(isMES ? "选择TX ID" : "选择机台ID"));
-     //  searchPanel.add(new JLabel(isMES ? "TX ID:" : "机台ID:"), BorderLayout.WEST);
-     //  searchPanel.add(searchField, BorderLayout.CENTER);
-     //  searchPanel.add(varBtn, BorderLayout.WEST);
-     //  searchPanel.add(searchBtn, BorderLayout.EAST);
 // 搜索面板
         JPanel searchPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 5));
         searchPanel.setBorder(BorderFactory.createTitledBorder(isMES ? "选择TX ID" : "选择机台ID"));
@@ -305,13 +302,19 @@ public class AixLogFinder extends JFrame {
         searchPanel.add(searchField);
 
 // 日期标签和选择器
-        searchPanel.add(dateLabel);
+        //searchPanel.add(dateLabel);
+        searchPanel.add(isMES ? timeLabel : dateLabel);
         dateSpinner.setPreferredSize(new Dimension(120, 24));
-        searchPanel.add(dateSpinner);
-
+        timesp.setPreferredSize(new Dimension(120, 24));
+        searchPanel.add(isMES ? timesp : dateSpinner);
+        if (isMES) {
+            timesp.setText(getSelectedDateTime());
+        }
 // 分类按钮
         varBtn.setPreferredSize(new Dimension(60, 24));
-        searchPanel.add(varBtn);
+
+        if(!isMES)
+            searchPanel.add(varBtn);
 
 // 搜索按钮
         searchBtn.setPreferredSize(new Dimension(80, 24));
@@ -416,33 +419,8 @@ public class AixLogFinder extends JFrame {
             gbc.fill = GridBagConstraints.NONE;
             VisualBtn.setPreferredSize(new Dimension(90, 24));
             tcsPanel.add(VisualBtn, gbc);
-//    //机台属性配置
-//    // 端口号
-//    gbc.gridx = 0;
-//    gbc.gridy = 2;
-//    gbc.weightx = 0.5;
-//    tcsPanel.add(new JLabel("PortID:"), gbc);
-//    // Port 类型
-//    gbc.gridx = 1;
-//    gbc.gridy = 2;
-//    gbc.weightx = 0.5;
-//    tcsPanel.add(new JLabel("Port类型:"), gbc);
-//    // Port 状态
-//    gbc.gridx = 2;
-//    gbc.gridy = 2;
-//    tcsPanel.add(new JLabel("Port状态:"), gbc);
-//    // 批次号
-//    gbc.gridx = 3;
-//    gbc.gridy = 2;
-//    tcsPanel.add(new JLabel("批次号:"), gbc);
-//    // 批次状态
-//    gbc.gridx = 4;
-//    gbc.gridy = 2;
-//    tcsPanel.add(new JLabel("批次状态:"), gbc);
-            // 新增：端口信息面板，添加到sessionPanel中
-           // sessionPanel.add(portInfoPanel, BorderLayout.SOUTH);
+
             sessionPanel.add(tcsPanel, BorderLayout.SOUTH); // 机台连接面板仍在下方
-         //   sessionPanel.add(tcsPanel, BorderLayout.SOUTH);
 
         }
 
@@ -917,12 +895,20 @@ public class AixLogFinder extends JFrame {
             JOptionPane.showMessageDialog(this, "请先选择一个会话！", "提示", JOptionPane.WARNING_MESSAGE);
             return;
         }
+        if (timesp.getText().equals(""))
+        {
+            JOptionPane.showMessageDialog(this, "请输入时间！", "提示", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
 
         String searchPath_TCS  = selectedConfig.getUserHome() + "tcsx/log/";
         String searchPath_MES  = selectedConfig.getUserHome() + "wfview_app/mm/applog/";
 
-
-        String searchText = searchField.getText().trim();
+        String searchText;
+        if (!isMES)
+            searchText = searchField.getText().trim();
+        else
+            searchText = searchField.getText().trim() + "_markpoint" + timesp.getText().trim();
 
         if (searchText.isEmpty()) {
             JOptionPane.showMessageDialog(this,
@@ -951,9 +937,17 @@ public class AixLogFinder extends JFrame {
                      command = "find " + searchPath_TCS + " -name \"" + searchPattern + "\" -type f 2>/dev/null";
                 }
                 else {
-                    command = "find " + searchPath_MES + " -name \"" + searchPattern + "\"";
+                    // MES模式下，同时搜索带时间戳的日志和最新日志
+                    String timeBasedLogPattern = "\"" + searchPattern + "\"";
+                    String latestLogPattern = "\"" + searchField.getText().trim() + "_markpoint.log\"";
+
+                    // 使用OR逻辑组合两个搜索条件
+                    command = "find " + searchPath_MES + " \\( -name " + timeBasedLogPattern + " -o -name " + latestLogPattern + " \\) -type f";
                 }
-                System.out.println("执行命令: " + command);
+//                else {
+//                    command = "find " + searchPath_MES + " -name \"" + searchPattern + "\"";
+//                }
+               // System.out.println("执行命令: " + command);
 
                 Channel channel = currentSession.openChannel("exec");
                 ((ChannelExec) channel).setCommand(command);
@@ -1458,6 +1452,19 @@ public class AixLogFinder extends JFrame {
             // 格式错误时返回当前日期
             Date today = new Date();
             SimpleDateFormat sdf = new SimpleDateFormat("yyyyMMdd");
+            return sdf.format(today);
+        }
+    }
+
+    private String getSelectedDateTime() {
+        try {
+            Date date = (Date) dateSpinner.getValue();
+            SimpleDateFormat sdf = new SimpleDateFormat("yyyyMMddHH"); // 格式：年月日小时（24小时制）
+            return sdf.format(date);
+        } catch (Exception e) {
+            // 格式错误时返回当前日期时间
+            Date today = new Date();
+            SimpleDateFormat sdf = new SimpleDateFormat("yyyyMMddHH");
             return sdf.format(today);
         }
     }
