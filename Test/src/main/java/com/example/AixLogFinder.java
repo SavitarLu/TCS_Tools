@@ -65,6 +65,7 @@ public class AixLogFinder extends JFrame {
     private JTextField tcsIdField; // 机台ID输入框
     private JTextField eqpStateField; // 机台ID输入框
     private JTextField timesp; // 机台ID输入框
+    private JTextField grepsp; // 机台ID输入框
     private JList<String> tcsSuggestionList; // 机台ID备选列表
     private DefaultListModel<String> tcsSuggestionModel; // 备选列表数据模型
     private JPopupMenu tcsSuggestionPopup; // 备选菜单
@@ -83,6 +84,7 @@ public class AixLogFinder extends JFrame {
     private JFormattedTextField dateField; // 日期输入字段
     private JLabel dateLabel; // 日期标签
     private JLabel timeLabel; // 日期标签
+    private JLabel GrepLabel; // grep
     public AixLogFinder(boolean isMES) {
         this.isMES = isMES; // 保存模式状态
         initComponents();
@@ -185,7 +187,9 @@ public class AixLogFinder extends JFrame {
         // 初始化日期选择器
         dateLabel = new JLabel("日期:");
         timeLabel = new JLabel("时间:");
+        GrepLabel = new JLabel("条件:");
         timesp = new JTextField();
+        grepsp = new JTextField();
         // 创建日期格式
         SpinnerDateModel dateModel = new SpinnerDateModel(
                 new Date(),                   // 初始日期为当前日期
@@ -298,17 +302,20 @@ public class AixLogFinder extends JFrame {
 
 // 搜索标签和输入框
         searchPanel.add(new JLabel(isMES ? "TX ID:" : "机台ID:"));
-        searchField.setPreferredSize(new Dimension(150, 24));
+        searchField.setPreferredSize(new Dimension(100, 24));
         searchPanel.add(searchField);
 
 // 日期标签和选择器
         //searchPanel.add(dateLabel);
         searchPanel.add(isMES ? timeLabel : dateLabel);
-        dateSpinner.setPreferredSize(new Dimension(120, 24));
-        timesp.setPreferredSize(new Dimension(120, 24));
+        dateSpinner.setPreferredSize(new Dimension(100, 24));
+        timesp.setPreferredSize(new Dimension(100, 24));
         searchPanel.add(isMES ? timesp : dateSpinner);
         if (isMES) {
             timesp.setText(getSelectedDateTime());
+            searchPanel.add(GrepLabel);
+            grepsp.setPreferredSize(new Dimension(120, 24));
+            searchPanel.add(grepsp);
         }
 // 分类按钮
         varBtn.setPreferredSize(new Dimension(60, 24));
@@ -895,14 +902,16 @@ public class AixLogFinder extends JFrame {
             JOptionPane.showMessageDialog(this, "请先选择一个会话！", "提示", JOptionPane.WARNING_MESSAGE);
             return;
         }
-        if (timesp.getText().equals(""))
-        {
-            JOptionPane.showMessageDialog(this, "请输入时间！", "提示", JOptionPane.WARNING_MESSAGE);
-            return;
+
+        if (isMES) {
+            if (timesp.getText().equals("")) {
+                JOptionPane.showMessageDialog(this, "请输入时间！", "提示", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
         }
 
-        String searchPath_TCS  = selectedConfig.getUserHome() + "tcsx/log/";
-        String searchPath_MES  = selectedConfig.getUserHome() + "wfview_app/mm/applog/";
+        String searchPath_TCS = selectedConfig.getUserHome() + "tcsx/log/";
+        String searchPath_MES = selectedConfig.getUserHome() + "wfview_app/mm/applog/";
 
         String searchText;
         if (!isMES)
@@ -912,17 +921,19 @@ public class AixLogFinder extends JFrame {
 
         if (searchText.isEmpty()) {
             JOptionPane.showMessageDialog(this,
-                    isMES ? "请输入TX ID！" : "请输入机台ID！", // 根据模式调整提示
+                    isMES ? "请输入TX ID！" : "请输入机台ID！",
                     "提示", JOptionPane.WARNING_MESSAGE);
             return;
         }
+
+        // 获取grep搜索条件
+        String grepCondition = grepsp.getText();
 
         SwingUtilities.invokeLater(() -> {
             resultListModel.clear();
             resultListModel.addElement("正在搜索...");
             searchResults.clear();
         });
-
 
         new Thread(() -> {
             try {
@@ -932,22 +943,24 @@ public class AixLogFinder extends JFrame {
                 if (!searchText.contains("*")) {
                     searchPattern = "*" + escapedSearchText + "*";
                 }
-                String command = " ";
+
+                String command;
                 if (!isMES) {
-                     command = "find " + searchPath_TCS + " -name \"" + searchPattern + "\" -type f 2>/dev/null";
-                }
-                else {
-                    // MES模式下，同时搜索带时间戳的日志和最新日志
+                    command = "find " + searchPath_TCS + " -name \"" + searchPattern + "\" -type f 2>/dev/null";
+                } else {
                     String timeBasedLogPattern = "\"" + searchPattern + "\"";
                     String latestLogPattern = "\"" + searchField.getText().trim() + "_markpoint.log\"";
 
-                    // 使用OR逻辑组合两个搜索条件
-                    command = "find " + searchPath_MES + " \\( -name " + timeBasedLogPattern + " -o -name " + latestLogPattern + " \\) -type f";
+                    if (grepCondition.isEmpty()) {
+                        // 无grep条件：仅搜索文件
+                        command = "find " + searchPath_MES + " \\( -name " + timeBasedLogPattern + " -o -name " + latestLogPattern + " \\) -type f";
+                    } else {
+                        // 有grep条件：搜索包含指定字符串的文件，并确保输出唯一路径
+                        String escapedGrep = grepCondition.replace("\"", "\\\"").replace("'", "\\'");
+                        command = "find " + searchPath_MES + " \\( -name " + timeBasedLogPattern + " -o -name " + latestLogPattern + " \\) -type f " +
+                                "-exec grep -li \"" + escapedGrep + "\" {} \\; 2>/dev/null | sort -u";
+                    }
                 }
-//                else {
-//                    command = "find " + searchPath_MES + " -name \"" + searchPattern + "\"";
-//                }
-               // System.out.println("执行命令: " + command);
 
                 Channel channel = currentSession.openChannel("exec");
                 ((ChannelExec) channel).setCommand(command);
@@ -962,9 +975,12 @@ public class AixLogFinder extends JFrame {
                 String line;
                 int filteredCount = 0;
 
+                // 使用Set存储结果以确保唯一性（额外保险）
+                Set<String> uniqueFiles = new HashSet<>();
+
                 while ((line = reader.readLine()) != null) {
                     if (!line.contains("comm")) {
-                        tempResults.add(line);
+                        uniqueFiles.add(line); // 自动去重
                     } else {
                         filteredCount++;
                     }
@@ -972,6 +988,7 @@ public class AixLogFinder extends JFrame {
 
                 channel.disconnect();
 
+                tempResults.addAll(uniqueFiles); // 将唯一结果转为列表
                 final List<String> finalResults = tempResults;
                 final int filtered = filteredCount;
 
@@ -1005,7 +1022,6 @@ public class AixLogFinder extends JFrame {
             }
         }).start();
     }
-
     private void openSelectedFile() {
         int selectedIndex = resultList.getSelectedIndex();
         if (selectedIndex < 0 || selectedIndex >= searchResults.size()) {
