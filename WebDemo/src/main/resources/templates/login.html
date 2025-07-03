@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>用户登录</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+
+  <!-- Tailwind配置 -->
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: '#165DFF',
+            secondary: '#00B42A',
+            danger: '#F53F3F',
+            neutral: {
+              100: '#F2F3F5',
+              200: '#E5E6EB',
+              300: '#C9CDD4',
+              400: '#86909C',
+              500: '#4E5969',
+              600: '#272E3B',
+              700: '#1D2129',
+            }
+          },
+          fontFamily: {
+            inter: ['Inter', 'system-ui', 'sans-serif'],
+          },
+          boxShadow: {
+            'card': '0 10px 30px -5px rgba(0, 0, 0, 0.1)',
+          }
+        }
+      }
+    }
+  </script>
+
+  <style type="text/tailwindcss">
+    @layer utilities {
+      .content-auto {
+        content-visibility: auto;
+      }
+      .transition-custom {
+        transition: all 0.3s ease;
+      }
+      .bg-gradient-custom {
+        background: linear-gradient(135deg, #165DFF 0%, #0040C9 100%);
+      }
+    }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen flex items-center justify-center font-inter">
+<div class="w-full max-w-md px-6 py-8 bg-white rounded-2xl shadow-card transition-custom hover:shadow-lg">
+  <div class="text-center mb-8">
+    <div class="w-16 h-16 bg-gradient-custom rounded-xl flex items-center justify-center mx-auto mb-4">
+      <i class="fa fa-user-circle text-white text-3xl"></i>
+    </div>
+    <h2 class="text-[clamp(1.5rem,3vw,2rem)] font-bold text-neutral-700">用户登录</h2>
+    <p class="text-neutral-400 mt-1">请输入账号密码登录系统</p>
+  </div>
+
+  <p class="text-danger text-sm mb-4 text-center" th:if="${error}" th:text="${error}"></p>
+
+  <form method="post" class="space-y-5">
+    <div>
+      <label for="username" class="block text-sm font-medium text-neutral-600 mb-1">用户名</label>
+      <div class="relative">
+                    <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-neutral-400">
+                        <i class="fa fa-user"></i>
+                    </span>
+        <input type="text" id="username" name="username" required
+               class="w-full pl-10 pr-4 py-3 rounded-lg border border-neutral-200 focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none transition-custom"
+               placeholder="请输入用户名">
+      </div>
+    </div>
+
+    <div>
+      <label for="password" class="block text-sm font-medium text-neutral-600 mb-1">密码</label>
+      <div class="relative">
+                    <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-neutral-400">
+                        <i class="fa fa-lock"></i>
+                    </span>
+        <input type="password" id="password" name="password" required
+               class="w-full pl-10 pr-4 py-3 rounded-lg border border-neutral-200 focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none transition-custom"
+               placeholder="请输入密码">
+      </div>
+    </div>
+
+    <button type="submit"
+            class="w-full bg-primary hover:bg-primary/90 text-white font-medium py-3 px-4 rounded-lg transition-custom flex items-center justify-center gap-2 shadow-md hover:shadow-lg">
+      <span>登录</span>
+      <i class="fa fa-arrow-right"></i>
+    </button>
+  </form>
+
+  <div class="mt-6 text-center text-neutral-500 text-sm">
+    <p>© 2025 登录系统 | 版权所有</p>
+  </div>
+</div>
+</body>
+</html>

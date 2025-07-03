@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>欢迎</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+
+  <!-- Tailwind配置 -->
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: '#165DFF',
+            secondary: '#00B42A',
+            neutral: {
+              100: '#F2F3F5',
+              200: '#E5E6EB',
+              300: '#C9CDD4',
+              400: '#86909C',
+              500: '#4E5969',
+              600: '#272E3B',
+              700: '#1D2129',
+            }
+          },
+          fontFamily: {
+            inter: ['Inter', 'system-ui', 'sans-serif'],
+          },
+        }
+      }
+    }
+  </script>
+
+  <style type="text/tailwindcss">
+    @layer utilities {
+      .content-auto {
+        content-visibility: auto;
+      }
+      .transition-custom {
+        transition: all 0.3s ease;
+      }
+      .bg-gradient-custom {
+        background: linear-gradient(135deg, #165DFF 0%, #0040C9 100%);
+      }
+    }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen font-inter">
+<!-- 顶部导航 -->
+<header class="bg-white shadow-sm sticky top-0 z-10">
+  <div class="container mx-auto px-4 py-4 flex justify-between items-center">
+    <div class="flex items-center gap-2">
+      <div class="w-10 h-10 bg-gradient-custom rounded-lg flex items-center justify-center">
+        <i class="fa fa-shield text-white"></i>
+      </div>
+      <span class="text-lg font-bold text-neutral-700">系统管理平台</span>
+    </div>
+
+    <nav>
+      <a href="/logout" class="text-neutral-600 hover:text-primary transition-custom flex items-center gap-1">
+        <i class="fa fa-sign-out"></i>
+        <span>退出登录</span>
+      </a>
+    </nav>
+  </div>
+</header>
+
+<!-- 主内容区 -->
+<main class="container mx-auto px-4 py-8">
+  <div class="max-w-2xl mx-auto bg-white rounded-xl shadow-sm p-8 mt-8">
+    <div class="text-center mb-6">
+      <div class="w-20 h-20 bg-secondary/10 rounded-full flex items-center justify-center mx-auto mb-4">
+        <i class="fa fa-check text-secondary text-3xl"></i>
+      </div>
+      <h1 class="text-[clamp(1.5rem,3vw,2.5rem)] font-bold text-neutral-700">欢迎回来, <span th:text="${username}" class="text-primary">用户</span>!</h1>
+      <p class="text-neutral-500 mt-2">您已成功登录系统</p>
+    </div>
+
+    <div class="bg-neutral-50 rounded-lg p-6 mt-8">
+      <h3 class="font-medium text-neutral-700 mb-4 flex items-center gap-2">
+        <i class="fa fa-info-circle text-primary"></i>
+        账户信息
+      </h3>
+
+      <div class="space-y-3 text-neutral-600">
+        <div class="flex items-center gap-4">
+          <span class="w-24 text-neutral-500">用户名:</span>
+          <span th:text="${username}" class="font-medium">admin</span>
+        </div>
+        <div class="flex items-center gap-4">
+          <span class="w-24 text-neutral-500">登录时间:</span>
+          <span class="font-medium" id="login-time">正在获取...</span>
+        </div>
+        <div class="flex items-center gap-4">
+          <span class="w-24 text-neutral-500">IP地址:</span>
+          <span class="font-medium" id="ip-address">正在获取...</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="mt-8 flex justify-center">
+      <a href="/logout"
+         class="inline-flex items-center justify-center gap-2 px-6 py-3 bg-primary hover:bg-primary/90 text-white rounded-lg transition-custom shadow-md hover:shadow-lg">
+        <i class="fa fa-sign-out"></i>
+        <span>退出登录</span>
+      </a>
+    </div>
+  </div>
+</main>
+
+<!-- 页脚 -->
+<footer class="bg-white border-t border-neutral-200 mt-12 py-6">
+  <div class="container mx-auto px-4 text-center text-neutral-500 text-sm">
+    <p>© 2025 系统管理平台 | 版权所有</p>
+  </div>
+</footer>
+
+<script>
+  // 模拟获取登录时间和IP地址
+  document.addEventListener('DOMContentLoaded', function() {
+    // 获取当前时间
+    const now = new Date();
+    const formattedTime = now.toLocaleString('zh-CN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    });
+    document.getElementById('login-time').textContent = formattedTime;
+
+    // 模拟IP地址（实际项目中需要后端提供）
+    document.getElementById('ip-address').textContent = '127.0.0.1';
+  });
+</script>
+</body>
+</html>

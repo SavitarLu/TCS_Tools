@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+<th:block th:replace="layout :: layout(_arg0=~{::content}, _arg1=${user}, _arg2=${activePage})">
+    <div th:fragment="content">
+        <h1 class="text-2xl font-bold text-neutral-700 mb-6">报表系统</h1>
+        <p class="text-neutral-500 mb-8">请从左侧导航栏选择需要查看的报表</p>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+            <div class="bg-white rounded-xl shadow-card p-6 transition-custom hover:shadow-lg">
+                <div class="flex items-start">
+                    <div class="bg-primary/10 p-3 rounded-lg">
+                        <i class="fa fa-list-alt text-primary text-xl"></i>
+                    </div>
+                    <div class="ml-4">
+                        <h3 class="text-lg font-medium text-neutral-700">设备事件报表</h3>
+                        <p class="mt-1 text-sm text-neutral-500">查看设备事件记录及统计信息</p>
+                        <a href="/report/decsalrm-his" class="mt-3 inline-flex items-center text-primary text-sm font-medium hover:underline">
+                            查看报表 <i class="fa fa-arrow-right ml-2"></i>
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 可以在这里添加更多报表卡片 -->
+        </div>
+    </div>
+</th:block>
+</body>
+</html>
