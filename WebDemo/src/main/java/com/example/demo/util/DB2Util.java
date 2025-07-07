@@ -17,7 +17,6 @@ public class DB2Util {
     static {
         try {
             Class.forName(DRIVER);
-            //System.out.println("DB2 驱动加载成功");
         } catch (ClassNotFoundException e) {
             System.err.println("DB2 驱动加载失败: " + e.getMessage());
         }
@@ -116,7 +115,7 @@ public class DB2Util {
         ResultSet rs = null;
 
         try {
-            conn = getConnection(); // 假设你有这个方法获取数据库连接
+            conn = getConnection();
             stmt = conn.createStatement();
             rs = stmt.executeQuery(sql);
 

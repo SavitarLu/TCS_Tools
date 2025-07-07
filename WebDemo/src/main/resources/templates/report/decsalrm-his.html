@@ -152,7 +152,6 @@
                         <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-neutral-500 uppercase tracking-wider">报警时间</th>
                         <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-neutral-500 uppercase tracking-wider">报警状态</th>
                         <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-neutral-500 uppercase tracking-wider">报警描述</th>
-<!--                        <th scope="col" class="px-6 py-3 text-right text-xs font-medium text-neutral-500 uppercase tracking-wider">操作</th>-->
                     </tr>
                     </thead>
                     <tbody class="bg-white divide-y divide-neutral-200" th:if="${not #lists.isEmpty(eventList)}">
@@ -162,23 +161,7 @@
                         <td class="px-6 py-4 whitespace-nowrap text-sm text-neutral-700" th:text="${event.alm_code}">报警代码</td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm text-neutral-700" th:text="${event.formattedAlmDttm}">报警时间</td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm text-neutral-700" th:text="${event.alm_stat}">报警状态</td>
-<!--                        <td class="px-6 py-4 whitespace-nowrap">-->
-<!--              <span th:switch="${event.alm_stat}">-->
-<!--                <span th:case="'0'" class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">已解决</span>-->
-<!--                <span th:case="'1'" class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">处理中</span>-->
-<!--                <span th:case="'2'" class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">未解决</span>-->
-<!--                <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">未知</span>-->
-<!--              </span>-->
-<!--                        </td>-->
                         <td class="px-6 py-4 text-sm text-neutral-700" th:text="${event.alm_text}">报警描述</td>
-<!--                        <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">-->
-<!--                            <a href="#" class="text-primary hover:text-primary/80 mr-3 transition-custom flex items-center inline-flex">-->
-<!--                                <i class="fa fa-eye mr-1"></i>查看-->
-<!--                            </a>-->
-<!--                            <a href="#" class="text-info hover:text-info/80 transition-custom flex items-center inline-flex">-->
-<!--                                <i class="fa fa-edit mr-1"></i>编辑-->
-<!--                            </a>-->
-<!--                        </td>-->
                     </tr>
                     </tbody>
                     <tbody class="bg-white divide-y divide-neutral-200" th:if="${#lists.isEmpty(eventList)}">

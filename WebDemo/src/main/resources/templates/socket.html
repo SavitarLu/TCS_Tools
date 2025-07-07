@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>TCP Socket Client</title>
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
+    <style>
+        body {
+            display: flex;
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            font-family: Arial, sans-serif;
+        }
+        .sidebar {
+            width: 300px;
+            background-color: #f5f5f5;
+            padding: 20px;
+            border-right: 1px solid #ddd;
+            box-sizing: border-box;
+        }
+        .main-content {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+        }
+        h1 {
+            margin-top: 0;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+        }
+        input {
+            width: 100%;
+            padding: 8px;
+            box-sizing: border-box;
+        }
+        button {
+            padding: 8px 15px;
+            margin-right: 10px;
+        }
+        #messages {
+            height: calc(100vh - 60px);
+            border: 1px solid #ddd;
+            padding: 10px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            font-family: monospace;
+        }
+        .server-timestamp {
+            color: #6b7280;
+            font-size: 0.9em;
+        }
+        .local-timestamp {
+            color: #9ca3af;
+            font-size: 0.8em;
+            margin-left: 10px;
+        }
+        .type-S {
+            color: #10b981; /* [S]类型及后续内容颜色 - 浅绿色 */
+        }
+        .type-H {
+            color: #8b5cf6; /* [H]类型及后续内容颜色 - 紫色 */
+        }
+    </style>
+</head>
+<body>
+<div class="sidebar">
+    <h1>TCS配置</h1>
+    <div class="form-group">
+        <label for="serverIp">服务器IP:</label>
+        <input type="text" id="serverIp" placeholder="127.0.0.1" value="10.196.61.10">
+    </div>
+    <div class="form-group">
+        <label for="serverPort">服务器端口:</label>
+        <input type="number" id="serverPort" placeholder="8080" value="16501">
+    </div>
+    <div class="form-group">
+        <button id="connectBtn" onclick="connect()">连接服务器</button>
+        <button id="disconnectBtn" onclick="disconnect()" disabled>断开连接</button>
+    </div>
+<!--    <div class="form-group">-->
+<!--        <label for="message">发送消息:</label>-->
+<!--        <input type="text" id="message" placeholder="输入消息" disabled>-->
+<!--        <button id="sendBtn" onclick="sendMessage()" disabled>发送</button>-->
+<!--    </div>-->
+</div>
+
+<div class="main-content">
+    <h1>消息显示</h1>
+    <div id="messages"></div>
+</div>
+
+<script>
+    var stompClient = null;
+    var socket = null;
+    var connectionId = null;
+
+    function connect() {
+        var serverIp = document.getElementById('serverIp').value;
+        var serverPort = document.getElementById('serverPort').value;
+
+        if (!serverIp || !serverPort) {
+            appendMessage("请输入服务器IP和端口");
+            return;
+        }
+
+        appendMessage("正在连接到服务器: " + serverIp + ":" + serverPort);
+
+        socket = new SockJS('/ws');
+        stompClient = Stomp.over(socket);
+
+        stompClient.connect({}, function(frame) {
+            console.log('Connected to WebSocket: ' + frame);
+            appendMessage("已连接到本地代理");
+
+            stompClient.subscribe('/topic/messages', function(message) {
+                appendMessage(message.body);
+            });
+
+            stompClient.send("/app/connect", {}, serverIp + ":" + serverPort);
+
+            document.getElementById('connectBtn').disabled = true;
+            document.getElementById('disconnectBtn').disabled = false;
+            document.getElementById('message').disabled = false;
+            document.getElementById('sendBtn').disabled = false;
+        }, function(error) {
+            appendMessage('连接失败: ' + error);
+            console.error('WebSocket error:', error);
+            document.getElementById('connectBtn').disabled = false;
+            document.getElementById('disconnectBtn').disabled = true;
+        });
+    }
+
+    function disconnect() {
+        if (stompClient !== null) {
+            if (connectionId) {
+                stompClient.send("/app/disconnect", {}, connectionId);
+            }
+            stompClient.disconnect();
+            appendMessage("已断开连接");
+        }
+        document.getElementById('connectBtn').disabled = false;
+        document.getElementById('disconnectBtn').disabled = true;
+        document.getElementById('message').disabled = true;
+        document.getElementById('sendBtn').disabled = true;
+        stompClient = null;
+        connectionId = null;
+    }
+
+    function sendMessage() {
+        var message = document.getElementById('message').value;
+        if (message && stompClient) {
+            stompClient.send("/app/send", {}, message);
+            appendMessage("发送: " + message);
+            document.getElementById('message').value = '';
+        }
+    }
+
+    function appendMessage(message) {
+        // 转义特殊HTML字符
+        message = message
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+
+        // 提取服务器时间戳（格式: YYYY-MM-DD-HH.mm.ss.fff）
+        var serverTimestampMatch = message.match(/^(\d{4}-\d{2}-\d{2}-\d{2}\.\d{2}\.\d{2}\.\d{3})\s+/);
+        var serverTimestamp = '';
+        var messageContent = message;
+
+        if (serverTimestampMatch) {
+            serverTimestamp = `<span class="server-timestamp">${serverTimestampMatch[1]}</span>`;
+            // 保留时间戳后的第一个空格
+            messageContent = message.substring(serverTimestampMatch[0].length).trimStart();
+        } else {
+            // 本地时间戳（仅当服务器时间戳不存在时显示）
+            var localTimestamp = `<span class="local-timestamp">[${new Date().toLocaleTimeString()}] </span>`;
+            serverTimestamp = localTimestamp;
+        }
+
+        // 判断消息类型并设置整行颜色
+        var messageType = '';
+        if (messageContent.startsWith('[S]')) {
+            messageType = 'type-S';
+        } else if (messageContent.startsWith('[H]')) {
+            messageType = 'type-H';
+        }
+
+        var div = document.createElement('div');
+        if (messageType) {
+            div.innerHTML = `${serverTimestamp} <span class="${messageType}">${messageContent}</span>`;
+        } else {
+            div.innerHTML = `${serverTimestamp} ${messageContent}`;
+        }
+        document.getElementById('messages').appendChild(div);
+        document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
+    }
+</script>
+</body>
+</html>
