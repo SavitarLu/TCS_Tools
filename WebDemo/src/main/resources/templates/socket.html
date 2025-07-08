@@ -5,6 +5,7 @@
     <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
     <style>
+        /* 保持原有样式不变 */
         body {
             display: flex;
             margin: 0;
@@ -39,10 +40,6 @@
             padding: 8px;
             box-sizing: border-box;
         }
-        button {
-            padding: 8px 15px;
-            margin-right: 10px;
-        }
         #messages {
             height: calc(100vh - 60px);
             border: 1px solid #ddd;
@@ -64,7 +61,13 @@
             color: #10b981; /* [S]类型及后续内容颜色 - 浅绿色 */
         }
         .type-H {
-            color: #8b5cf6; /* [H]类型及后续内容颜色 - 紫色 */
+            color: #f49305; /* [H]类型及后续内容颜色 - 紫色 */
+        }
+        .type-M {
+            color: #8b5cf6; /* [M]类型及后续内容颜色 - 紫色 */
+        }
+        .type-E {
+            color: #f50303; /* [E]类型及后续内容颜色 - 紫色 */
         }
         .suggestions {
             position: absolute;
@@ -89,10 +92,93 @@
             font-size: 0.9em;
             color: #666;
         }
+
+        /* 按钮样式优化 */
+        button {
+            padding: 10px 15px;
+            margin-right: 8px;
+            margin-bottom: 8px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s ease;
+            min-width: 80px;
+        }
+
+        button:not(:disabled) {
+            background-color: #3b82f6;
+            color: white;
+        }
+
+        button:not(:disabled):hover {
+            background-color: #2563eb;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        button:not(:disabled):active {
+            background-color: #1d4ed8;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        }
+
+        #loadMachineListBtn {
+            background-color: #10b981;
+        }
+
+        #loadMachineListBtn:not(:disabled):hover {
+            background-color: #059669;
+        }
+
+        #reloadBtn, #procedureBtn {
+            background-color: #f59e0b;
+        }
+
+        #reloadBtn:not(:disabled):hover, #procedureBtn:not(:disabled):hover {
+            background-color: #d97706;
+        }
+
+        #disconnectBtn {
+            background-color: #ef4444;
+        }
+
+        #disconnectBtn:not(:disabled):hover {
+            background-color: #dc2626;
+        }
+
+        button:disabled {
+            background-color: #9ca3af;
+            color: #e5e7eb;
+            cursor: not-allowed;
+            opacity: 0.7;
+        }
+
+        .button-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .form-group:has(button) {
+            margin-bottom: 20px;
+        }
+
+        .form-group:last-of-type {
+            margin-bottom: 30px;
+        }
+
+        /* 新增下拉列表样式 */
+        #procedureList {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 10px;
+            box-sizing: border-box;
+        }
     </style>
 </head>
 <body>
 <div class="sidebar">
+    <!-- 保持原有HTML结构不变 -->
     <h1>TCS配置</h1>
     <div class="form-group">
         <label for="serverIp">服务器IP:</label>
@@ -109,17 +195,33 @@
         <label for="serverPort">服务器端口:</label>
         <input type="number" id="serverPort" placeholder="自动获取端口" disabled>
     </div>
-    <div class="form-group">
+    <div class="form-group button-group">
         <button id="loadMachineListBtn" onclick="loadMachineList()">加载机台列表</button>
-        <span id="machineCount" style="margin-left: 10px;"></span>
+        <span id="machineCount" style="margin-left: 10px; align-self: center;"></span>
     </div>
     <div class="form-group ftp-status">
         <span id="ftpStatus"></span>
     </div>
-    <div class="form-group">
+    <div class="form-group button-group">
         <button id="connectBtn" onclick="connect()">连接服务器</button>
         <button id="disconnectBtn" onclick="disconnect()" disabled>断开连接</button>
     </div>
+    <div class="form-group button-group">
+        <button id="reloadBtn" onclick="sendReloadCommand()" disabled>发送Reload</button>
+        <button id="procedureBtn" onclick="sendGetProcedureList()" disabled>获取Procedure</button>
+<!--        &lt;!&ndash; 新增：本地模拟按钮 &ndash;&gt;-->
+<!--        <button id="simulateProcedureBtn" onclick="simulateProcedureList()">模拟解析</button>-->
+    </div>
+
+    <!-- 新增：Procedure列表下拉框 -->
+    <div class="form-group">
+        <label for="procedureList">Procedure List:</label>
+        <select id="procedureList" style="width: 100%;" onchange="procedureSelected()"></select>
+        <button id="sendSelectedProcedureBtn" onclick="sendSelectedProcedure()" disabled>发送选中Procedure</button>
+    </div>
+
+    <!-- 移除了procedureDialog相关HTML -->
+    <div id="overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 999;"></div>
 </div>
 
 <div class="main-content">
@@ -128,37 +230,158 @@
 </div>
 
 <script>
+    // 保持原有变量定义不变
     var stompClient = null;
     var socket = null;
     var connectionId = null;
-    var machineMap = {}; // 机台号到端口的映射
-    var allMachineIds = []; // 所有机台号列表
+    var machineMap = {};
+    var allMachineIds = [];
+    var isConnected = false;
+    var procedureList = [];
+    var isWaitingForProcedureList = false;
 
-    // 使用FTP协议获取远程文件
-    // 通过后端API获取机台列表
+//     // 新增：本地测试用的XML数据
+//     const testXmlData = `<?xml version="1.0" encoding="Shift_JIS" standalone="yes"?>
+// <ecstap>
+//     <command>getplist</command>
+//     <cmdno>0</cmdno>
+//     <plist>
+//         <name>$S1F13_F14_ESTABLISH_COMMUNICATION_RECEIVE</name>
+//         <name>$S1F1_F2_ARE_YOU_THERE_RECEIVE</name>
+//         <name>$S5F101</name>
+//         <name>$S6F11_EVENT_REPORT</name>
+//         <name>$S6F65_STOCKER_INVENTORY_REPORT</name>
+//         <name>$S6F67_EVENT_COMMAND_REPORT</name>
+//         <name>$S6F69_STOCKER_STATUS_REPORT</name>
+//         <name>$S6F71</name>
+//         <name>$S6F73_ZFS_INVENTORY_REPORT</name>
+//         <name>$S9F9</name>
+//         <name>$S9FX</name>
+//         <name>CARRIER_DESTINATION_CHANGE</name>
+//         <name>INITIALIZE</name>
+//         <name>INVENTORY_LOOP_PROCESS</name>
+//         <name>MCSX_PUT_MSG</name>
+//         <name>ONLINE_REMOTE_SCENARIO</name>
+//         <name>PROCESS_EQP_CONT_MODE</name>
+//         <name>REQUEST_CARRIER_STOCKOUT</name>
+//         <name>REQUEST_CARRIER_TRANSFER</name>
+//         <name>REQUEST_STOCK_MESSAGE</name>
+//         <name>S1F13_F14_ESTABLISH_COMMUNICATION_REQUEST</name>
+//         <name>S1F15_F16_REQUEST_OFFLINE</name>
+//         <name>S1F17_F18_REQUEST_ONLINE</name>
+//         <name>S1F1_F2_ARE_YOU_THERE_REQUEST</name>
+//         <name>S2F17_F18_DATE_AND_TIME_REQUEST</name>
+//         <name>S2F31_F32_DATE_AND_TIME_SET</name>
+//         <name>SEND_COMMAND_STOCKERINVENTORYREQUEST</name>
+//         <name>SEND_COMMAND_UTBINVENTORYREQUEST</name>
+//         <name>SET_ASCII_DATA_FOR_S2F41_EQUIPMENTID</name>
+//         <name>SET_ASCII_DATA_FOR_S2F41_GRUOPID</name>
+//         <name>TAP_VERSION</name>
+//         <name>TCSX_EVENT_REPORT</name>
+//         <name>TCSX_EVENT_SET_TERMINAL_MSG</name>
+//         <name>TEST_STOCKER_INVENTORY_REQUEST</name>
+//         <name>TEST_STOCKER_STATUS_REQUEST</name>
+//         <name>TRANSFER_REQUEST</name>
+//         <name>UTB_INVENTORY_LOOP_PROCESS</name>
+//     </plist>
+// </ecstap>`;
+
+    // 发送getplist命令（保持不变）
+    function sendGetProcedureList() {
+        if (!isConnected || !stompClient) {
+            appendMessage("未连接到服务器，无法获取Procedure列表");
+            return;
+        }
+        isWaitingForProcedureList = true;
+        const getPlistXml = '<?xml version="1.0" encoding="Shift_JIS" standalone="yes"?><ecstap><command>getplist</command><cmdno>0</cmdno></ecstap>';
+        stompClient.send("/app/send", {}, getPlistXml);
+       // appendMessage("发送getplist命令: " + getPlistXml);
+    }
+
+    // 新增：模拟解析Procedure列表
+    function simulateProcedureList() {
+        console.log("开始模拟解析Procedure列表...");
+        isWaitingForProcedureList = true;
+        // 模拟接收到消息
+        appendMessage("模拟接收到Procedure列表响应");
+        // 直接调用解析函数
+        parseProcedureXml(testXmlData);
+    }
+
+    // 新增：提取为独立函数，便于复用和测试
+    function parseProcedureXml(xmlContent) {
+        try {
+            // 记录解析开始
+            console.time("XML解析耗时");
+
+            // 解析XML
+            const parser = new DOMParser();
+            const xmlDoc = parser.parseFromString(xmlContent, "text/xml");
+
+            // 检查解析是否成功
+            const parseError = xmlDoc.querySelector("parsererror");
+            if (parseError) {
+                throw new Error("XML解析错误: " + parseError.textContent);
+            }
+
+            // 获取所有name标签
+            const nameElements = xmlDoc.getElementsByTagName('name');
+            console.log("找到name标签数量:", nameElements.length);
+
+            if (nameElements.length > 0) {
+                procedureList = Array.from(nameElements).map(el => el.textContent.trim());
+
+                // 更新下拉列表
+                const procedureListSelect = document.getElementById('procedureList');
+                procedureListSelect.innerHTML = ''; // 清空现有选项
+
+                // 添加选项
+                procedureList.forEach((name, index) => {
+                    const option = document.createElement('option');
+                    option.value = name;
+                    option.textContent = name;
+                    procedureListSelect.appendChild(option);
+
+                    // 每10个选项记录一次
+                    if ((index + 1) % 10 === 0 || index === procedureList.length - 1) {
+                        console.log(`已添加选项 ${index + 1}/${procedureList.length}: ${name}`);
+                    }
+                });
+
+                // 启用发送按钮
+                document.getElementById('sendSelectedProcedureBtn').disabled = false;
+
+                appendMessage(`成功解析 ${procedureList.length} 个Procedure选项`);
+                console.log("解析成功，选项已添加到下拉列表");
+            } else {
+                appendMessage("未找到Procedure列表数据");
+                console.warn("未找到任何<name>标签");
+            }
+
+            console.timeEnd("XML解析耗时");
+        } catch (e) {
+            appendMessage("解析Procedure列表失败: " + e.message);
+            console.error("Procedure解析错误:", e);
+        } finally {
+            isWaitingForProcedureList = false; // 重置等待状态
+        }
+    }
+
+    // 加载机台列表等原有函数保持不变
     function loadMachineList() {
-        // 指向SSH获取文件的API端点
-        const apiUrl = 'http://10.196.61.10:9070/api/ssh/fetch'; // 请根据实际端口修改
-
+        const apiUrl = 'http://115.190.25.67:9070/api/ssh/fetch';
         updateFtpStatus('正在通过SSH获取机台列表...');
-
         fetch(apiUrl)
             .then(response => {
-                if (!response.ok) {
-                    throw new Error(`API请求失败，状态码: ${response.status}`);
-                }
+                if (!response.ok) throw new Error(`API请求失败，状态码: ${response.status}`);
                 return response.text();
             })
             .then(data => {
-                // 检查是否为错误信息
                 if (data.startsWith('SSH连接失败') || data.startsWith('SFTP操作失败') || data.startsWith('文件不存在')) {
                     throw new Error(data);
                 }
-
                 updateFtpStatus('文件下载完成，正在解析...');
-                // 解析数据
                 parseMachineData(data);
-
                 updateFtpStatus(`成功加载 ${allMachineIds.length} 个机台配置`);
                 document.getElementById('machineCount').textContent = `已加载: ${allMachineIds.length} 个`;
                 appendMessage(`成功加载 ${allMachineIds.length} 个机台配置`);
@@ -170,43 +393,29 @@
             });
     }
 
-    // 更新FTP状态显示
     function updateFtpStatus(message) {
         const statusElement = document.getElementById('ftpStatus');
         statusElement.textContent = message;
         statusElement.className = 'ftp-status';
-
-        // 错误信息显示为红色
-        if (message.includes('失败')) {
-            statusElement.classList.add('error');
-        }
+        if (message.includes('失败')) statusElement.classList.add('error');
+        else statusElement.classList.remove('error');
     }
 
-    // 解析机台数据
     function parseMachineData(data) {
         machineMap = {};
         allMachineIds = [];
-
-        // 按行分割数据
         const lines = data.split('\n');
         let isDataSection = false;
-
         lines.forEach(line => {
-            // 跳过空行和注释行
             if (!line.trim() || line.startsWith('#') || line.includes('EQP-ID') || line.includes('--------------')) {
-                if (line.includes('EQP-ID')) {
-                    isDataSection = true; // 标记数据部分开始
-                }
+                if (line.includes('EQP-ID')) isDataSection = true;
                 return;
             }
-
             if (isDataSection) {
-                // 解析EQP-ID和端口号
                 const parts = line.split(/\s+/);
                 if (parts.length >= 3) {
                     const eqpId = parts[0];
                     const port = parts[parts.length - 1];
-
                     machineMap[eqpId] = port;
                     allMachineIds.push(eqpId);
                 }
@@ -214,7 +423,6 @@
         });
     }
 
-    // 查找机台并显示建议
     function findMachine(input) {
         if (!input.trim()) {
             hideSuggestions();
@@ -222,21 +430,14 @@
             document.getElementById('serverPort').disabled = true;
             return;
         }
-
-        // 过滤匹配的机台号
         const suggestions = allMachineIds.filter(id => id.toLowerCase().includes(input.toLowerCase()));
-
         if (suggestions.length === 0) {
             hideSuggestions();
             document.getElementById('serverPort').value = '';
             document.getElementById('serverPort').disabled = true;
             return;
         }
-
-        // 显示建议
         showSuggestions(suggestions);
-
-        // 如果只有一个匹配项，自动填充并获取端口
         if (suggestions.length === 1) {
             document.getElementById('machineId').value = suggestions[0];
             getPortForMachine(suggestions[0]);
@@ -244,11 +445,9 @@
         }
     }
 
-    // 显示建议列表
     function showSuggestions(suggestions) {
         const suggestionsDiv = document.getElementById('suggestions');
         suggestionsDiv.innerHTML = '';
-
         suggestions.forEach(suggestion => {
             const item = document.createElement('div');
             item.className = 'suggestion-item';
@@ -260,16 +459,13 @@
             };
             suggestionsDiv.appendChild(item);
         });
-
         suggestionsDiv.style.display = 'block';
     }
 
-    // 隐藏建议列表
     function hideSuggestions() {
         document.getElementById('suggestions').style.display = 'none';
     }
 
-    // 获取机台对应的端口号
     function getPortForMachine(machineId) {
         const port = machineMap[machineId];
         if (port) {
@@ -281,11 +477,9 @@
         }
     }
 
-    // 点击页面其他地方隐藏建议
     document.addEventListener('click', (event) => {
         const machineIdInput = document.getElementById('machineId');
         const suggestionsDiv = document.getElementById('suggestions');
-
         if (!machineIdInput.contains(event.target) && !suggestionsDiv.contains(event.target)) {
             hideSuggestions();
         }
@@ -294,36 +488,33 @@
     function connect() {
         var serverIp = document.getElementById('serverIp').value;
         var serverPort = document.getElementById('serverPort').value;
-
         if (!serverIp || !serverPort) {
             appendMessage("请输入服务器IP和端口");
             return;
         }
-
         appendMessage("正在连接到服务器: " + serverIp + ":" + serverPort);
-
         socket = new SockJS('/ws');
         stompClient = Stomp.over(socket);
-
         stompClient.connect({}, function(frame) {
             console.log('Connected to WebSocket: ' + frame);
             appendMessage("已连接到本地代理");
-
+            isConnected = true;
+            updateButtonStates();
             stompClient.subscribe('/topic/messages', function(message) {
                 appendMessage(message.body);
+                // 新增：如果是Procedure响应，尝试解析
+                if (isWaitingForProcedureList && message.body.includes('<plist>')) {
+                    parseProcedureXml(message.body);
+                }
             });
-
             stompClient.send("/app/connect", {}, serverIp + ":" + serverPort);
-
             document.getElementById('connectBtn').disabled = true;
             document.getElementById('disconnectBtn').disabled = false;
-            document.getElementById('message').disabled = false;
-            document.getElementById('sendBtn').disabled = false;
         }, function(error) {
             appendMessage('连接失败: ' + error);
             console.error('WebSocket error:', error);
-            document.getElementById('connectBtn').disabled = false;
-            document.getElementById('disconnectBtn').disabled = true;
+            isConnected = false;
+            updateButtonStates();
         });
     }
 
@@ -334,26 +525,45 @@
             }
             stompClient.disconnect();
             appendMessage("已断开连接");
+            isConnected = false;
+            updateButtonStates();
         }
         document.getElementById('connectBtn').disabled = false;
         document.getElementById('disconnectBtn').disabled = true;
-        document.getElementById('message').disabled = true;
-        document.getElementById('sendBtn').disabled = true;
         stompClient = null;
         connectionId = null;
     }
 
-    function sendMessage() {
-        var message = document.getElementById('message').value;
-        if (message && stompClient) {
-            stompClient.send("/app/send", {}, message);
-            appendMessage("发送: " + message);
-            document.getElementById('message').value = '';
+    function sendReloadCommand() {
+        if (!isConnected || !stompClient) {
+            appendMessage("未连接到服务器，无法发送Reload命令");
+            return;
         }
+
+        // 添加确认对话框
+        if (!confirm("你确定要发送Reload命令吗？")) {
+            appendMessage("用户取消发送Reload命令");
+            return;
+        }
+
+        const reloadXml = '<?xml version="1.0" encoding="Shift_JIS" standalone="yes"?><ecstap><command>reload</command><cmdno>0</cmdno><type>tap</type><options><inittap>1</inittap></options></ecstap>';
+        stompClient.send("/app/send", {}, reloadXml);
+        appendMessage("发送Reload命令: " + reloadXml);
     }
 
+    function updateButtonStates() {
+        const reloadBtn = document.getElementById('reloadBtn');
+        reloadBtn.disabled = !isConnected;
+        procedureBtn.disabled = !isConnected;
+
+        // 新增：更新发送按钮状态
+        const sendSelectedProcedureBtn = document.getElementById('sendSelectedProcedureBtn');
+        sendSelectedProcedureBtn.disabled = !isConnected || document.getElementById('procedureList').options.length === 0;
+    }
+
+    // 核心修改：优化消息处理
     function appendMessage(message) {
-        // 转义特殊HTML字符
+        // 原有HTML转义处理
         message = message
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
@@ -361,29 +571,31 @@
             .replace(/"/g, '&quot;')
             .replace(/'/g, '&#039;');
 
-        // 提取服务器时间戳（格式: YYYY-MM-DD-HH.mm.ss.fff）
+        // 时间戳处理（保持不变）
         var serverTimestampMatch = message.match(/^(\d{4}-\d{2}-\d{2}-\d{2}\.\d{2}\.\d{2}\.\d{3})\s+/);
         var serverTimestamp = '';
         var messageContent = message;
-
         if (serverTimestampMatch) {
             serverTimestamp = `<span class="server-timestamp">${serverTimestampMatch[1]}</span>`;
-            // 保留时间戳后的第一个空格
             messageContent = message.substring(serverTimestampMatch[0].length).trimStart();
         } else {
-            // 本地时间戳（仅当服务器时间戳不存在时显示）
             var localTimestamp = `<span class="local-timestamp">[${new Date().toLocaleTimeString()}] </span>`;
             serverTimestamp = localTimestamp;
         }
 
-        // 判断消息类型并设置整行颜色
+        // 消息类型处理（保持不变）
         var messageType = '';
         if (messageContent.startsWith('[S]')) {
             messageType = 'type-S';
         } else if (messageContent.startsWith('[H]')) {
             messageType = 'type-H';
+        } else if (messageContent.startsWith('[E]')) {
+            messageType = 'type-E';
+        } else if (messageContent.startsWith('[M]')) {
+            messageType = 'type-M';
         }
 
+        // 显示消息（保持不变）
         var div = document.createElement('div');
         if (messageType) {
             div.innerHTML = `${serverTimestamp} <span class="${messageType}">${messageContent}</span>`;
@@ -392,6 +604,41 @@
         }
         document.getElementById('messages').appendChild(div);
         document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
+    }
+
+    // 新增：当选择Procedure列表项时的处理
+    function procedureSelected() {
+        // 可以添加预览功能
+        const selectedProcedure = document.getElementById('procedureList').value;
+        console.log("选中命令:", selectedProcedure);
+    }
+
+    // 新增：发送选中的命令
+    function sendSelectedProcedure() {
+        const selectedProcedure = document.getElementById('procedureList').value;
+        if (!selectedProcedure) {
+            appendMessage("请选择一个命令");
+            return;
+        }
+
+        // 添加确认对话框
+        if (!confirm("你确定要发送选中的命令吗？\n\n" + selectedProcedure)) {
+            appendMessage("用户取消发送命令");
+            return;
+        }
+
+        if (stompClient && isConnected) {
+            // 构造发送内容（根据命令类型调整XML格式）
+//             const procedureXml = `<?xml version="1.0" encoding="Shift_JIS" standalone="yes"?>
+// <ecstap>
+//     <command>${selectedProcedure}</command>
+//     <cmdno>1</cmdno>
+// </ecstap>`;
+            const procedureXml = `<?xml version="1.0" encoding="Shift_JIS" standalone="yes"?><ecstap><command>exec</command><cmdno>0</cmdno><name>${selectedProcedure}</name></ecstap>`;
+            stompClient.send("/app/send", {}, procedureXml);
+            appendMessage(`发送命令: ${selectedProcedure}`);
+            // appendMessage("发送内容: " + procedureXml);
+        }
     }
 </script>
 </body>

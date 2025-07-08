@@ -9,8 +9,7 @@ import org.springframework.web.bind.annotation.ResponseBody;
 
 import java.io.*;
 import java.net.Socket;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.*;
 
 @Controller
 public class TcpProxyController {
@@ -21,6 +20,7 @@ public class TcpProxyController {
     private BufferedReader reader;
     private PrintWriter writer;
     private volatile boolean running = false;
+    private Future<?> listenerFuture; // 新增：用于管理监听线程
 
     // SSH服务器配置
     private static final String SSH_SERVER = "10.196.60.107";
@@ -117,7 +117,8 @@ public class TcpProxyController {
 
             messagingTemplate.convertAndSend("/topic/messages", "已连接到服务器: " + ip + ":" + port);
 
-            threadPool.submit(this::listenForServerMessages);
+            // 提交监听任务并保存Future引用
+            listenerFuture = threadPool.submit(this::listenForServerMessages);
         } catch (IOException e) {
             messagingTemplate.convertAndSend("/topic/messages", "连接失败: " + e.getMessage());
             e.printStackTrace();
@@ -126,8 +127,13 @@ public class TcpProxyController {
 
     private void listenForServerMessages() {
         try {
-            String line;
-            while (running && (line = reader.readLine()) != null) {
+            // 设置当前线程的中断状态检查
+            while (!Thread.currentThread().isInterrupted() && running) {
+                String line = reader.readLine(); // 阻塞操作
+                if (line == null) { // 连接关闭
+                    break;
+                }
+                //System.out.println(line);
                 messagingTemplate.convertAndSend("/topic/messages", line);
             }
         } catch (IOException e) {
@@ -135,6 +141,9 @@ public class TcpProxyController {
                 messagingTemplate.convertAndSend("/topic/messages", "连接断开: " + e.getMessage());
                 closeConnection();
             }
+        } finally {
+            // 确保连接关闭
+            closeConnection();
         }
     }
 
@@ -147,7 +156,7 @@ public class TcpProxyController {
 
         try {
             writer.println(message);
-            messagingTemplate.convertAndSend("/topic/messages", "发送: " + message);
+          //  messagingTemplate.convertAndSend("/topic/messages", "发送: " + message);
         } catch (Exception e) {
             messagingTemplate.convertAndSend("/topic/messages", "发送失败: " + e.getMessage());
             closeConnection();
@@ -161,13 +170,19 @@ public class TcpProxyController {
     }
 
     private void closeConnection() {
+        // 新增：首先中断监听线程
+        if (listenerFuture != null && !listenerFuture.isDone()) {
+            listenerFuture.cancel(true); // 中断正在执行的任务
+        }
+
         running = false;
         try {
-            if (reader != null) reader.close();
-            if (writer != null) writer.close();
+            // 新增：先关闭底层Socket，会导致reader.readLine()抛出异常
             if (tcpSocket != null && !tcpSocket.isClosed()) {
                 tcpSocket.close();
             }
+            if (reader != null) reader.close();
+            if (writer != null) writer.close();
         } catch (IOException e) {
             e.printStackTrace();
         } finally {
