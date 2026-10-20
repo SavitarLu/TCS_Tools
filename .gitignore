@@ -1,0 +1,30 @@
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.gitignore
+!/.gitignore
+*.iml
+*.iws
+*.ipr
+.vscode/
+
+# Build output
+out/
+target/
+build/
+dist/
+
+# Local runtime/config data
+*.dat
+Test/EQPID.txt
+Test/tcsxList.txt
+Test/txList.txt
+
+# Packaged binaries and local vendor jars
+*.jar
+
+# Logs/temp
+*.log
+*.tmp
