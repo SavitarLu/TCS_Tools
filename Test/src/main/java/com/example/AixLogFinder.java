@@ -143,8 +143,11 @@ public class AixLogFinder extends JFrame {
         resultList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         resultScrollPane = new JScrollPane(resultList);
 
-        String[] defaultEditors = {"系统默认", "记事本", "VS Code", "Sublime Text"};
+        String[] defaultEditors = {"系统默认", "VS Code", "Sublime Text", "记事本", "选择程序..."};
         editorComboBox = new JComboBox<>(defaultEditors);
+        if (isMES) {
+            editorComboBox.setSelectedItem("VS Code");
+        }
 
         // 连接状态组件
         sessionStatusDot = new JLabel();
@@ -336,7 +339,6 @@ public class AixLogFinder extends JFrame {
         resultPanel.setBorder(BorderFactory.createTitledBorder("搜索结果"));
         resultPanel.add(searchPanel, BorderLayout.NORTH);
         resultPanel.add(resultScrollPane, BorderLayout.CENTER);
-        resultPanel.add(actionPanel, BorderLayout.SOUTH);
 
         downloadPathLabel = new JLabel("下载路径: "+ downloadPath);
         chooseDownloadPathBtn = new JButton("选择下载路径");
@@ -344,7 +346,10 @@ public class AixLogFinder extends JFrame {
         downloadPathPanel.add(downloadPathLabel);
         downloadPathPanel.add(chooseDownloadPathBtn);
 
-        resultPanel.add(downloadPathPanel, BorderLayout.SOUTH);
+        JPanel bottomPanel = new JPanel(new BorderLayout());
+        bottomPanel.add(actionPanel, BorderLayout.NORTH);
+        bottomPanel.add(downloadPathPanel, BorderLayout.SOUTH);
+        resultPanel.add(bottomPanel, BorderLayout.SOUTH);
 
         JPanel leftMainPanel = new JPanel(new BorderLayout());
         leftMainPanel.add(sessionPanel, BorderLayout.CENTER);
@@ -911,7 +916,7 @@ public class AixLogFinder extends JFrame {
         }
 
         String searchPath_TCS = selectedConfig.getUserHome() + "tcsx/log/";
-        String searchPath_MES = selectedConfig.getUserHome() + "wfview_app/mm/applog/";
+        String searchPath_MES = selectedConfig.getUserHome() + "mm/applog/";
 
         String searchText;
         if (!isMES)
@@ -1062,24 +1067,68 @@ public class AixLogFinder extends JFrame {
         File file = new File(filePath);
 
         if ("系统默认".equals(editor)) {
-            if (Desktop.isDesktopSupported()) {
-                Desktop.getDesktop().open(file);
-            } else {
-                Runtime.getRuntime().exec("open " + filePath);
-            }
+            openWithSystemDefault(file);
+        } else if ("VS Code".equals(editor)) {
+            openWithEditor(file, "Visual Studio Code", "code");
+        } else if ("Sublime Text".equals(editor)) {
+            openWithEditor(file, "Sublime Text", "subl");
         } else if ("记事本".equals(editor)) {
-            if (System.getProperty("os.name").toLowerCase().contains("win")) {
-                Runtime.getRuntime().exec("notepad " + filePath);
+            if (isWindows()) {
+                openWithCommand(new String[]{"notepad", filePath});
             } else {
                 JOptionPane.showMessageDialog(this, "记事本仅适用于Windows系统", "错误", JOptionPane.ERROR_MESSAGE);
             }
-        } else if ("VS Code".equals(editor)) {
-            Runtime.getRuntime().exec("code " + filePath);
-        } else if ("Sublime Text".equals(editor)) {
-            Runtime.getRuntime().exec("subl " + filePath);
+        } else if ("选择程序...".equals(editor)) {
+            chooseApplicationAndOpen(file);
         } else {
             JOptionPane.showMessageDialog(this, "未知编辑器: " + editor, "错误", JOptionPane.ERROR_MESSAGE);
         }
+    }
+
+    private void openWithSystemDefault(File file) throws IOException {
+        if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.OPEN)) {
+            Desktop.getDesktop().open(file);
+        } else if (isMac()) {
+            openWithCommand(new String[]{"open", file.getAbsolutePath()});
+        } else {
+            openWithCommand(new String[]{"xdg-open", file.getAbsolutePath()});
+        }
+    }
+
+    private void openWithEditor(File file, String macAppName, String commandName) throws IOException {
+        if (isMac()) {
+            openWithCommand(new String[]{"open", "-a", macAppName, file.getAbsolutePath()});
+        } else {
+            openWithCommand(new String[]{commandName, file.getAbsolutePath()});
+        }
+    }
+
+    private void openWithCommand(String[] command) throws IOException {
+        new ProcessBuilder(command).start();
+    }
+
+    private void chooseApplicationAndOpen(File file) throws IOException {
+        JFileChooser chooser = new JFileChooser();
+        chooser.setDialogTitle("选择打开方式");
+        chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
+
+        int result = chooser.showOpenDialog(this);
+        if (result == JFileChooser.APPROVE_OPTION) {
+            File app = chooser.getSelectedFile();
+            if (isMac()) {
+                openWithCommand(new String[]{"open", "-a", app.getAbsolutePath(), file.getAbsolutePath()});
+            } else {
+                openWithCommand(new String[]{app.getAbsolutePath(), file.getAbsolutePath()});
+            }
+        }
+    }
+
+    private boolean isMac() {
+        return System.getProperty("os.name").toLowerCase().contains("mac");
+    }
+
+    private boolean isWindows() {
+        return System.getProperty("os.name").toLowerCase().contains("win");
     }
 
     private void loadSessions() {
