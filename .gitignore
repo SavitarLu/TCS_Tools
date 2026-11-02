@@ -22,6 +22,11 @@ Test/EQPID.txt
 Test/tcsxList.txt
 Test/txList.txt
 
+# Local credentials / environment-specific config (see *.example)
+db.properties
+ssh.properties
+!*.example
+
 # Packaged binaries and local vendor jars
 *.jar
 

@@ -369,7 +369,7 @@
 
     // 加载机台列表等原有函数保持不变
     function loadMachineList() {
-        const apiUrl = 'http://115.190.25.67:9070/api/ssh/fetch';
+        const apiUrl = '/api/ssh/fetch';
         updateFtpStatus('正在通过SSH获取机台列表...');
         fetch(apiUrl)
             .then(response => {
@@ -500,7 +500,13 @@
             appendMessage("已连接到本地代理");
             isConnected = true;
             updateButtonStates();
-            stompClient.subscribe('/topic/messages', function(message) {
+            // 每个浏览器会话订阅自己的主题，服务端消息不会串到别人的页面
+            var sessionId = frame.headers['session'];
+            if (!sessionId) {
+                appendMessage("未获取到会话ID，无法接收服务端消息");
+                return;
+            }
+            stompClient.subscribe('/topic/messages/' + sessionId, function(message) {
                 appendMessage(message.body);
                 // 新增：如果是Procedure响应，尝试解析
                 if (isWaitingForProcedureList && message.body.includes('<plist>')) {
@@ -520,8 +526,8 @@
 
     function disconnect() {
         if (stompClient !== null) {
-            if (connectionId) {
-                stompClient.send("/app/disconnect", {}, connectionId);
+            if (isConnected) {
+                stompClient.send("/app/disconnect", {}, "");
             }
             stompClient.disconnect();
             appendMessage("已断开连接");

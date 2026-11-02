@@ -1,134 +1,166 @@
 package com.example.demo.util;
+
+import com.zaxxer.hikari.HikariConfig;
+import com.zaxxer.hikari.HikariDataSource;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.lang.reflect.Field;
-import java.sql.*;
-import java.util.*;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.sql.Timestamp;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
-public class DB2Util {
-    // 数据库连接 URL
-    private static final String URL = DBConfig.getUrl();
-    // 数据库用户名
-    private static final String USER = DBConfig.getUser();
-    // 数据库密码
-    private static final String PASSWORD = DBConfig.getPassword();
-    // DB2 JDBC 驱动类名
-    private static final String DRIVER = DBConfig.getDriver();
+/**
+ * DB2 访问工具。
+ *
+ * <p>使用 HikariCP 连接池，所有查询走 {@link PreparedStatement}，调用方通过
+ * {@code ?} 占位符传参，避免 SQL 注入。</p>
+ */
+public final class DB2Util {
 
-    // 静态代码块，加载驱动程序
+    private static final Logger log = LoggerFactory.getLogger(DB2Util.class);
+
+    /** 每个实体类的 列名 → Field 缓存，避免逐行逐列反射查找。 */
+    private static final Map<Class<?>, Map<String, Field>> FIELD_CACHE = new ConcurrentHashMap<>();
+
+    private static final HikariDataSource DATA_SOURCE;
+
     static {
-        try {
-            Class.forName(DRIVER);
-        } catch (ClassNotFoundException e) {
-            System.err.println("DB2 驱动加载失败: " + e.getMessage());
+        String driver = DBConfig.getDriver();
+        if (driver != null && !driver.isEmpty()) {
+            try {
+                Class.forName(driver);
+            } catch (ClassNotFoundException e) {
+                log.error("DB2 驱动加载失败: {}", e.getMessage());
+            }
         }
+
+        HikariConfig config = new HikariConfig();
+        config.setJdbcUrl(DBConfig.getUrl());
+        config.setUsername(DBConfig.getUser());
+        config.setPassword(DBConfig.getPassword());
+        if (driver != null && !driver.isEmpty()) {
+            config.setDriverClassName(driver);
+        }
+        config.setPoolName("db2-pool");
+        config.setMaximumPoolSize(10);
+        config.setMinimumIdle(1);
+        config.setConnectionTimeout(10_000);
+        // 启动时数据库不可用不阻止应用启动，等真正查询时再报错
+        config.setInitializationFailTimeout(-1);
+        DATA_SOURCE = new HikariDataSource(config);
     }
 
-    /**
-     * 获取数据库连接
-     * @return 数据库连接对象
-     * @throws SQLException 如果获取连接失败
-     */
+    private DB2Util() {
+    }
+
     public static Connection getConnection() throws SQLException {
-        return DriverManager.getConnection(URL, USER, PASSWORD);
+        return DATA_SOURCE.getConnection();
     }
 
-    /**
-     * 关闭数据库资源
-     * @param conn 数据库连接
-     * @param stmt Statement 对象
-     * @param rs 结果集
-     */
-    public static void close(Connection conn, Statement stmt, ResultSet rs) {
-        try {
-            if (rs != null) rs.close();
-            if (stmt != null) stmt.close();
-            if (conn != null) conn.close();
-        } catch (SQLException e) {
-            System.err.println("关闭数据库资源失败: " + e.getMessage());
-        }
-    }
-
-    /**
-     * 泛型查询方法，将结果集映射到指定类型的实体类
-     * @param sql 查询 SQL 语句
-     * @param clazz 实体类的 Class 对象
-     * @param <T> 实体类类型
-     * @return 实体类对象列表
-     */
-    public static <T> List<T> executeQuery(String sql, Class<T> clazz) {
+    public static <T> List<T> executeQuery(String sql, Class<T> clazz, Object... params) {
         List<T> resultList = new ArrayList<>();
-        Connection conn = null;
-        Statement stmt = null;
-        ResultSet rs = null;
-        try {
-            conn = getConnection();
-            stmt = conn.createStatement();
-            rs = stmt.executeQuery(sql);
-            ResultSetMetaData metaData = rs.getMetaData();
-            int columnCount = metaData.getColumnCount();
 
-            while (rs.next()) {
-                T obj = clazz.getDeclaredConstructor().newInstance();
-                for (int i = 1; i <= columnCount; i++) {
-                    String columnName = metaData.getColumnName(i).toLowerCase(); // 全部转为小写
-                    Object value = rs.getObject(i);
+        try (Connection conn = getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
 
-                    try {
-                        Field field = clazz.getDeclaredField(columnName);
-                        field.setAccessible(true);
+            bindParams(stmt, params);
 
-                        // 处理特殊类型转换
-                        if (value != null) {
-                            Class<?> fieldType = field.getType();
+            try (ResultSet rs = stmt.executeQuery()) {
+                ResultSetMetaData metaData = rs.getMetaData();
+                int columnCount = metaData.getColumnCount();
+                Map<String, Field> fields = FIELD_CACHE.computeIfAbsent(clazz, DB2Util::indexFields);
 
-                            if (fieldType == int.class || fieldType == Integer.class) {
-                                value = rs.getInt(i);
-                            } else if (fieldType == long.class || fieldType == Long.class) {
-                                value = rs.getLong(i);
-                            } else if (fieldType == double.class || fieldType == Double.class) {
-                                value = rs.getDouble(i);
-                            } else if (fieldType == boolean.class || fieldType == Boolean.class) {
-                                value = rs.getBoolean(i);
-                            } else if (fieldType == Timestamp.class) {
-                                value = rs.getTimestamp(i);
-                            }
+                while (rs.next()) {
+                    T obj = clazz.getDeclaredConstructor().newInstance();
+                    for (int i = 1; i <= columnCount; i++) {
+                        Field field = fields.get(metaData.getColumnName(i).toLowerCase());
+                        if (field == null) {
+                            continue;
                         }
-
+                        Object value = rs.getObject(i);
+                        if (value != null) {
+                            value = convert(value, field.getType(), rs, i);
+                        }
                         field.set(obj, value);
-                    } catch (NoSuchFieldException | IllegalAccessException e) {
-                        System.err.println("字段映射失败: " + columnName + " (" + e.getMessage() + ")");
                     }
+                    resultList.add(obj);
                 }
-                resultList.add(obj);
             }
+            return resultList;
         } catch (SQLException | ReflectiveOperationException e) {
-            System.err.println("执行查询失败: " + e.getMessage());
-        } finally {
-            close(conn, stmt, rs);
+            throw new DataAccessException("执行查询失败: " + e.getMessage(), e);
         }
-
-        return resultList;
     }
 
-    public static Integer executeCountQuery(String sql) {
-        Connection conn = null;
-        Statement stmt = null;
-        ResultSet rs = null;
+    public static int executeCountQuery(String sql, Object... params) {
+        try (Connection conn = getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
 
-        try {
-            conn = getConnection();
-            stmt = conn.createStatement();
-            rs = stmt.executeQuery(sql);
-
-            if (rs.next()) {
-                return rs.getInt(1);
+            bindParams(stmt, params);
+            try (ResultSet rs = stmt.executeQuery()) {
+                return rs.next() ? rs.getInt(1) : 0;
             }
-
-            return 0;
         } catch (SQLException e) {
-            e.printStackTrace();
-            return 0;
-        } finally {
-            close(conn, stmt, rs);
+            throw new DataAccessException("执行统计查询失败: " + e.getMessage(), e);
+        }
+    }
+
+    private static Map<String, Field> indexFields(Class<?> clazz) {
+        Map<String, Field> map = new HashMap<>();
+        for (Field field : clazz.getDeclaredFields()) {
+            field.setAccessible(true);
+            map.put(field.getName().toLowerCase(), field);
+        }
+        return Collections.unmodifiableMap(map);
+    }
+
+    private static Object convert(Object value, Class<?> fieldType, ResultSet rs, int index) throws SQLException {
+        if (fieldType == int.class || fieldType == Integer.class) {
+            return rs.getInt(index);
+        }
+        if (fieldType == long.class || fieldType == Long.class) {
+            return rs.getLong(index);
+        }
+        if (fieldType == double.class || fieldType == Double.class) {
+            return rs.getDouble(index);
+        }
+        if (fieldType == boolean.class || fieldType == Boolean.class) {
+            return rs.getBoolean(index);
+        }
+        if (fieldType == Timestamp.class) {
+            return rs.getTimestamp(index);
+        }
+        return value;
+    }
+
+    private static void bindParams(PreparedStatement stmt, Object[] params) throws SQLException {
+        if (params == null) {
+            return;
+        }
+        for (int i = 0; i < params.length; i++) {
+            stmt.setObject(i + 1, params[i]);
+        }
+    }
+
+    /**
+     * 数据库访问异常。原先静默返回空列表，"出错"和"没数据"无法区分。
+     */
+    public static class DataAccessException extends RuntimeException {
+        private static final long serialVersionUID = 1L;
+
+        public DataAccessException(String message, Throwable cause) {
+            super(message, cause);
         }
     }
 }

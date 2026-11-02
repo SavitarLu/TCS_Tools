@@ -14,11 +14,18 @@ import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.text.MessageFormat;
 import java.util.*;
 import java.util.List;
-import java.util.Timer;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
+
+import com.example.util.FileOpener;
+import com.example.util.SessionCrypto;
+import com.example.util.SessionStore;
+import com.example.util.ShellEscape;
 
 import javax.swing.border.TitledBorder;
 
@@ -27,6 +34,9 @@ import static DB2.DB2Util.*;
 public class AixLogFinder extends JFrame {
     private static final String TCS_CONFIG_FILE = "sessions_TCS.dat";
     private static final String MES_CONFIG_FILE = "sessions_MES.dat";
+    /** 打包时由 pom.xml 写入 MANIFEST，IDE 里运行时读不到，回退到下面的常量。 */
+    private static final String VERSION_FALLBACK = "1.0-SNAPSHOT";
+    private static final String APP_VERSION = resolveVersion();
     private static String CONFIG_FILE = " ";
     private static final String TEMP_DIR = System.getProperty("java.io.tmpdir");
     private static final Color CONNECTED_COLOR = new Color(0, 255, 0);
@@ -48,13 +58,20 @@ public class AixLogFinder extends JFrame {
     private JComboBox<String> editorComboBox;
     private JLabel sessionStatusDot; // 连接状态点
     private JLabel eqpStatusDot; // 连接状态点
-    private JLabel currentUserLabel,downloadPathLabel; // 当前用户标签
+    private JLabel currentUserLabel,downloadPathLabel,versionLabel; // 当前用户标签
     private JTextField searchField; // 输入框
     private JList<String> suggestionList; // 备选列表
     private DefaultListModel<String> suggestionModel; // 备选列表数据模型
     private JPopupMenu suggestionPopup; // 备选菜单
     private List<String> localDataList = new ArrayList<>(); // 本地数据源
-    private Timer filterTimer = new Timer(); // 添加成员变量
+    /** 输入过滤用的单线程调度器，避免每次按键都新建 Timer 线程。 */
+    private final ScheduledExecutorService filterExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread thread = new Thread(r, "suggestion-filter");
+        thread.setDaemon(true);
+        return thread;
+    });
+    private ScheduledFuture<?> pendingFilter;
+    private ScheduledFuture<?> pendingTcsFilter;
     private JSplitPane sessionPortSplitPane;
     private static final String DOWNLOAD_CONFIG_FILE = "download_path.dat"; // 下载路径配置文件
     private String downloadPath = TEMP_DIR; // 默认路径为系统临时目录
@@ -69,7 +86,6 @@ public class AixLogFinder extends JFrame {
     private JList<String> tcsSuggestionList; // 机台ID备选列表
     private DefaultListModel<String> tcsSuggestionModel; // 备选列表数据模型
     private JPopupMenu tcsSuggestionPopup; // 备选菜单
-    private Timer tcsFilterTimer = new Timer(); // 过滤定时器
 
     private JButton connectTcsBtn; // 连接TCS按钮
     private JButton VisualBtn; // 连接TCS按钮
@@ -93,7 +109,7 @@ public class AixLogFinder extends JFrame {
         loadDownloadPath();
         setupLayout();
         setupListeners();
-        setTitle(isMES ? "MES实用小工具" : "TCS实用小工具");
+        setTitle(windowTitle());
         setSize(1200, 800);
         setDefaultCloseOperation(EXIT_ON_CLOSE);
         setLocationRelativeTo(null);
@@ -102,6 +118,16 @@ public class AixLogFinder extends JFrame {
         } else {
             tcsIdField.requestFocusInWindow(); // TCS模式聚焦机台ID
         }
+    }
+
+    private String windowTitle() {
+        return (isMES ? "MES实用小工具" : "TCS实用小工具") + "  v" + APP_VERSION;
+    }
+
+    private static String resolveVersion() {
+        String fromManifest = AixLogFinder.class.getPackage().getImplementationVersion();
+        return fromManifest == null || fromManifest.trim().isEmpty()
+                ? VERSION_FALLBACK : fromManifest.trim();
     }
 
     private void initComponents() {
@@ -346,6 +372,11 @@ public class AixLogFinder extends JFrame {
         downloadPathPanel.add(downloadPathLabel);
         downloadPathPanel.add(chooseDownloadPathBtn);
 
+        versionLabel = new JLabel("版本 v" + APP_VERSION);
+        versionLabel.setForeground(new Color(130, 130, 130));
+        versionLabel.setBorder(BorderFactory.createEmptyBorder(0, 12, 0, 4));
+        downloadPathPanel.add(versionLabel);
+
         JPanel bottomPanel = new JPanel(new BorderLayout());
         bottomPanel.add(actionPanel, BorderLayout.NORTH);
         bottomPanel.add(downloadPathPanel, BorderLayout.SOUTH);
@@ -518,22 +549,7 @@ public class AixLogFinder extends JFrame {
 
             @Override
             public void keyReleased(KeyEvent e) {
-                String input = searchField.getText().trim();
-                filterTimer.cancel();
-                filterTimer = new Timer();
-                filterTimer.schedule(new TimerTask() {
-                    @Override
-                    public void run() {
-                        filterSuggestions(input);
-                        SwingUtilities.invokeLater(() -> {
-                            if (suggestionModel.getSize() > 0 && searchField.hasFocus()) {
-                                suggestionPopup.show(searchField, 0, searchField.getHeight());
-                            } else {
-                                suggestionPopup.setVisible(false);
-                            }
-                        });
-                    }
-                }, 0);
+                scheduleSuggestionFilter(searchField.getText().trim());
             }
         });
 
@@ -590,22 +606,7 @@ public class AixLogFinder extends JFrame {
 
                 @Override
                 public void keyReleased(KeyEvent e) {
-                    String input = tcsIdField.getText().trim();
-                    tcsFilterTimer.cancel();
-                    tcsFilterTimer = new Timer();
-                    tcsFilterTimer.schedule(new TimerTask() {
-                        @Override
-                        public void run() {
-                            filterTcsSuggestions(input);
-                            SwingUtilities.invokeLater(() -> {
-                                if (tcsSuggestionModel.getSize() > 0 && tcsIdField.hasFocus()) {
-                                    tcsSuggestionPopup.show(tcsIdField, 0, tcsIdField.getHeight());
-                                } else {
-                                    tcsSuggestionPopup.setVisible(false);
-                                }
-                            });
-                        }
-                    }, 300);
+                    scheduleTcsSuggestionFilter(tcsIdField.getText().trim());
                 }
             });
 
@@ -675,7 +676,7 @@ public class AixLogFinder extends JFrame {
         disconnectPreviousSession();
         isMES = !isMES;
         CONFIG_FILE = isMES ? MES_CONFIG_FILE : TCS_CONFIG_FILE;
-        setTitle(isMES ? "MES实用小工具" : "TCS实用小工具");
+        setTitle(windowTitle());
         portInfoPanel.setVisible(false);
         sessionListModel.clear();
         sessionConfigs.clear();
@@ -741,6 +742,9 @@ public class AixLogFinder extends JFrame {
 
     private List<Process> runningProcesses = new ArrayList<>();
 
+    /** TCS 客户端连接的管理主机。 */
+    private static final String TCS_ADMIN_HOST = "10.196.60.107";
+
 
     private void connectToTcs() {
         if (isMES) return; // MES模式不支持此功能
@@ -760,23 +764,22 @@ public class AixLogFinder extends JFrame {
 
         try {
             // 使用批处理文件中的Java路径
-            String javaExe = "\"C:\\Program Files (x86)\\IBM\\Java80\\jre\\bin\\javaw.exe\"";
+            String javaExe = "C:\\Program Files (x86)\\IBM\\Java80\\jre\\bin\\javaw.exe";
 
             // 使用完整的JAR文件路径
-            String jarPath = "\"C:\\Program Files (x86)\\IBM\\TCSX Java Client\\jtcsxc.jar\"";
+            String jarPath = "C:\\Program Files (x86)\\IBM\\TCSX Java Client\\jtcsxc.jar";
 
-            // 构建完整命令（带引号处理空格）
-            String command = javaExe + " -jar " + jarPath + " -admin 10.196.60.107 " + port;
-
-            // 执行命令
-            Process process = Runtime.getRuntime().exec(command);
+            // 参数逐个传入，避免路径含空格或特殊字符时被错误拆分
+            ProcessBuilder builder = new ProcessBuilder(
+                    javaExe, "-jar", jarPath, "-admin", TCS_ADMIN_HOST, port);
+            Process process = builder.start();
 
             // 添加到进程列表
             runningProcesses.add(process);
 
             // 记录启动信息
             System.out.println("已启动客户端，机台ID: " + tcsId + "，端口: " + port);
-            System.out.println("执行命令: " + command);
+            System.out.println("执行命令: " + builder.command());
 
             // 显示成功消息
             JOptionPane.showMessageDialog(this,
@@ -817,21 +820,12 @@ public class AixLogFinder extends JFrame {
     }
 
     private void loadDownloadPath() {
-        File file = new File(DOWNLOAD_CONFIG_FILE);
-        if (file.exists()) {
-            try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
-                downloadPath = reader.readLine();
-            } catch (IOException ex) {
-                JOptionPane.showMessageDialog(this, "加载下载路径失败: " + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
-            }
-        } else {
-            downloadPath = TEMP_DIR;
-        }
+        downloadPath = SessionStore.loadDownloadPath(new File(DOWNLOAD_CONFIG_FILE), TEMP_DIR);
     }
 
     private void saveDownloadPath() {
-        try (BufferedWriter writer = new BufferedWriter(new FileWriter(DOWNLOAD_CONFIG_FILE))) {
-            writer.write(downloadPath);
+        try {
+            SessionStore.saveDownloadPath(new File(DOWNLOAD_CONFIG_FILE), downloadPath);
             downloadPathLabel.setText("下载路径: " + downloadPath);
         } catch (IOException ex) {
             JOptionPane.showMessageDialog(this, "保存下载路径失败: " + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
@@ -842,14 +836,49 @@ public class AixLogFinder extends JFrame {
 
 
     private void filterSuggestions(String keyword) {
+        String needle = keyword.toLowerCase();
         List<String> filtered = localDataList.stream()
-                .filter(item -> item.toLowerCase().contains(keyword.toLowerCase()))
+                .filter(item -> item.toLowerCase().contains(needle))
                 .collect(Collectors.toList());
 
         SwingUtilities.invokeLater(() -> {
             suggestionModel.clear();
             filtered.forEach(suggestionModel::addElement);
         });
+    }
+
+    /** 输入 TX ID 时延迟刷新备选列表，始终只保留最后一次待执行的任务。 */
+    private void scheduleSuggestionFilter(String input) {
+        if (pendingFilter != null) {
+            pendingFilter.cancel(false);
+        }
+        pendingFilter = filterExecutor.schedule(() -> {
+            filterSuggestions(input);
+            SwingUtilities.invokeLater(() -> {
+                if (suggestionModel.getSize() > 0 && searchField.hasFocus()) {
+                    suggestionPopup.show(searchField, 0, searchField.getHeight());
+                } else {
+                    suggestionPopup.setVisible(false);
+                }
+            });
+        }, 0, TimeUnit.MILLISECONDS);
+    }
+
+    /** 输入机台 ID 时延迟 300ms 刷新备选列表。 */
+    private void scheduleTcsSuggestionFilter(String input) {
+        if (pendingTcsFilter != null) {
+            pendingTcsFilter.cancel(false);
+        }
+        pendingTcsFilter = filterExecutor.schedule(() -> {
+            filterTcsSuggestions(input);
+            SwingUtilities.invokeLater(() -> {
+                if (tcsSuggestionModel.getSize() > 0 && tcsIdField.hasFocus()) {
+                    tcsSuggestionPopup.show(tcsIdField, 0, tcsIdField.getHeight());
+                } else {
+                    tcsSuggestionPopup.setVisible(false);
+                }
+            });
+        }, 300, TimeUnit.MILLISECONDS);
     }
 
 
@@ -863,10 +892,22 @@ public class AixLogFinder extends JFrame {
     }
 
     private void performConnect() {
-        String host = hostField.getText();
-        int port = Integer.parseInt(portField.getText());
-        String user = userField.getText();
+        String host = hostField.getText().trim();
+        String user = userField.getText().trim();
         String password = new String(passwordFieldActual.getPassword());
+
+        int port;
+        try {
+            port = Integer.parseInt(portField.getText().trim());
+        } catch (NumberFormatException ex) {
+            JOptionPane.showMessageDialog(this, "端口必须是数字！", "提示", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
+        if (host.isEmpty() || user.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "请填写主机和用户名！", "提示", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
 
         try {
             JSch jsch = new JSch();
@@ -916,7 +957,9 @@ public class AixLogFinder extends JFrame {
         }
 
         String searchPath_TCS = selectedConfig.getUserHome() + "tcsx/log/";
-        String searchPath_MES = selectedConfig.getUserHome() + "mm/applog/";
+        // MES 服务器有两种部署目录，两个都查，不存在的目录由 find 的 2>/dev/null 忽略
+        String mesSearchDirs = ShellEscape.quote(selectedConfig.getUserHome() + "mm/applog") + " "
+                + ShellEscape.quote(selectedConfig.getUserHome() + "wfview_app/mm/applog");
 
         String searchText;
         if (!isMES)
@@ -940,34 +983,34 @@ public class AixLogFinder extends JFrame {
             searchResults.clear();
         });
 
+        // 后台线程里用局部引用，避免用户中途切换会话导致从错误的服务器下载
+        final Session searchSession = currentSession;
+
         new Thread(() -> {
             try {
-                String escapedSearchText = searchText.replace("\"", "\\\"").replace("*", "\\*");
-                String searchPattern = escapedSearchText;
-
-                if (!searchText.contains("*")) {
-                    searchPattern = "*" + escapedSearchText + "*";
-                }
+                // 所有外部输入都经过单引号转义，防止 $(...) / 反引号在远端被执行
+                String namePattern = searchText.contains("*") ? searchText : "*" + searchText + "*";
 
                 String command;
                 if (!isMES) {
-                    command = "find " + searchPath_TCS + " -name \"" + searchPattern + "\" -type f 2>/dev/null";
+                    command = "find " + ShellEscape.quote(searchPath_TCS)
+                            + " -name " + ShellEscape.quote(namePattern) + " -type f 2>/dev/null";
                 } else {
-                    String timeBasedLogPattern = "\"" + searchPattern + "\"";
-                    String latestLogPattern = "\"" + searchField.getText().trim() + "_markpoint.log\"";
+                    String nameArgs = "\\( -name " + ShellEscape.quote(namePattern)
+                            + " -o -name " + ShellEscape.quote(searchField.getText().trim() + "_markpoint.log")
+                            + " \\)";
 
                     if (grepCondition.isEmpty()) {
                         // 无grep条件：仅搜索文件
-                        command = "find " + searchPath_MES + " \\( -name " + timeBasedLogPattern + " -o -name " + latestLogPattern + " \\) -type f";
+                        command = "find " + mesSearchDirs + " " + nameArgs + " -type f 2>/dev/null | sort -u";
                     } else {
                         // 有grep条件：搜索包含指定字符串的文件，并确保输出唯一路径
-                        String escapedGrep = grepCondition.replace("\"", "\\\"").replace("'", "\\'");
-                        command = "find " + searchPath_MES + " \\( -name " + timeBasedLogPattern + " -o -name " + latestLogPattern + " \\) -type f " +
-                                "-exec grep -li \"" + escapedGrep + "\" {} \\; 2>/dev/null | sort -u";
+                        command = "find " + mesSearchDirs + " " + nameArgs + " -type f -exec grep -li "
+                                + ShellEscape.quote(grepCondition) + " {} \\; 2>/dev/null | sort -u";
                     }
                 }
 
-                Channel channel = currentSession.openChannel("exec");
+                Channel channel = searchSession.openChannel("exec");
                 ((ChannelExec) channel).setCommand(command);
                 channel.setInputStream(null);
                 ((ChannelExec) channel).setErrStream(System.err);
@@ -1036,12 +1079,22 @@ public class AixLogFinder extends JFrame {
 
         String remoteFilePath = searchResults.get(selectedIndex);
         String fileName = new File(remoteFilePath).getName();
-        String localFilePath = downloadPath + File.separator + fileName;
+
+        File localFile;
+        try {
+            localFile = uniqueLocalFile(downloadPath, fileName);
+        } catch (IOException ex) {
+            JOptionPane.showMessageDialog(this, "准备下载目录失败: " + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        final String localFilePath = localFile.getAbsolutePath();
+        final Session downloadSession = currentSession;
+        final String editor = (String) editorComboBox.getSelectedItem();
 
         new Thread(() -> {
             try {
-                downloadFile(remoteFilePath, localFilePath);
-                String editor = (String) editorComboBox.getSelectedItem();
+                downloadFile(downloadSession, remoteFilePath, localFilePath);
                 openLocalFile(localFilePath, editor);
             } catch (Exception ex) {
                 SwingUtilities.invokeLater(() -> {
@@ -1052,8 +1105,33 @@ public class AixLogFinder extends JFrame {
         }).start();
     }
 
-    private void downloadFile(String remoteFilePath, String localFilePath) throws JSchException, SftpException, IOException {
-        ChannelSftp sftpChannel = (ChannelSftp) currentSession.openChannel("sftp");
+    /**
+     * 不同目录下可能存在同名 log，加时间戳避免互相覆盖。
+     */
+    private File uniqueLocalFile(String dir, String fileName) throws IOException {
+        File directory = new File(dir);
+        if (!directory.exists() && !directory.mkdirs()) {
+            throw new IOException("无法创建目录: " + dir);
+        }
+        File candidate = new File(directory, fileName);
+        if (!candidate.exists()) {
+            return candidate;
+        }
+
+        String base = fileName;
+        String suffix = "";
+        int dot = fileName.lastIndexOf('.');
+        if (dot > 0) {
+            base = fileName.substring(0, dot);
+            suffix = fileName.substring(dot);
+        }
+        String stamp = new SimpleDateFormat("yyyyMMddHHmmssSSS").format(new Date());
+        return new File(directory, base + "_" + stamp + suffix);
+    }
+
+    private void downloadFile(Session session, String remoteFilePath, String localFilePath)
+            throws JSchException, SftpException, IOException {
+        ChannelSftp sftpChannel = (ChannelSftp) session.openChannel("sftp");
         sftpChannel.connect();
 
         try (OutputStream out = new FileOutputStream(localFilePath)) {
@@ -1064,47 +1142,11 @@ public class AixLogFinder extends JFrame {
     }
 
     private void openLocalFile(String filePath, String editor) throws IOException {
-        File file = new File(filePath);
-
-        if ("系统默认".equals(editor)) {
-            openWithSystemDefault(file);
-        } else if ("VS Code".equals(editor)) {
-            openWithEditor(file, "Visual Studio Code", "code");
-        } else if ("Sublime Text".equals(editor)) {
-            openWithEditor(file, "Sublime Text", "subl");
-        } else if ("记事本".equals(editor)) {
-            if (isWindows()) {
-                openWithCommand(new String[]{"notepad", filePath});
-            } else {
-                JOptionPane.showMessageDialog(this, "记事本仅适用于Windows系统", "错误", JOptionPane.ERROR_MESSAGE);
-            }
-        } else if ("选择程序...".equals(editor)) {
-            chooseApplicationAndOpen(file);
+        if ("选择程序...".equals(editor)) {
+            chooseApplicationAndOpen(new File(filePath));
         } else {
-            JOptionPane.showMessageDialog(this, "未知编辑器: " + editor, "错误", JOptionPane.ERROR_MESSAGE);
+            FileOpener.open(filePath, editor);
         }
-    }
-
-    private void openWithSystemDefault(File file) throws IOException {
-        if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.OPEN)) {
-            Desktop.getDesktop().open(file);
-        } else if (isMac()) {
-            openWithCommand(new String[]{"open", file.getAbsolutePath()});
-        } else {
-            openWithCommand(new String[]{"xdg-open", file.getAbsolutePath()});
-        }
-    }
-
-    private void openWithEditor(File file, String macAppName, String commandName) throws IOException {
-        if (isMac()) {
-            openWithCommand(new String[]{"open", "-a", macAppName, file.getAbsolutePath()});
-        } else {
-            openWithCommand(new String[]{commandName, file.getAbsolutePath()});
-        }
-    }
-
-    private void openWithCommand(String[] command) throws IOException {
-        new ProcessBuilder(command).start();
     }
 
     private void chooseApplicationAndOpen(File file) throws IOException {
@@ -1114,55 +1156,31 @@ public class AixLogFinder extends JFrame {
 
         int result = chooser.showOpenDialog(this);
         if (result == JFileChooser.APPROVE_OPTION) {
-            File app = chooser.getSelectedFile();
-            if (isMac()) {
-                openWithCommand(new String[]{"open", "-a", app.getAbsolutePath(), file.getAbsolutePath()});
-            } else {
-                openWithCommand(new String[]{app.getAbsolutePath(), file.getAbsolutePath()});
-            }
+            FileOpener.openWithApplication(chooser.getSelectedFile(), file);
         }
-    }
-
-    private boolean isMac() {
-        return System.getProperty("os.name").toLowerCase().contains("mac");
-    }
-
-    private boolean isWindows() {
-        return System.getProperty("os.name").toLowerCase().contains("win");
     }
 
     private void loadSessions() {
-        if(isMES)
-        {
-            CONFIG_FILE = MES_CONFIG_FILE;
-        }
-        else {
-            CONFIG_FILE = TCS_CONFIG_FILE;
-        }
-        File file = new File(CONFIG_FILE);
-        if (file.exists()) {
-            try (ObjectInputStream ois = new ObjectInputStream(new FileInputStream(file))) {
-                sessionConfigs = (List<SessionConfig>) ois.readObject();
+        CONFIG_FILE = isMES ? MES_CONFIG_FILE : TCS_CONFIG_FILE;
+        try {
+            List<SessionConfig> loaded = SessionStore.loadObject(new File(CONFIG_FILE));
+            if (loaded != null) {
+                sessionConfigs = loaded;
+                sessionListModel.clear();
                 for (SessionConfig config : sessionConfigs) {
                     sessionListModel.addElement(config);
                 }
-            } catch (Exception ex) {
-                JOptionPane.showMessageDialog(this, "加载会话失败: " + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
-                ex.printStackTrace();
             }
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, "加载会话失败: " + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
+            ex.printStackTrace();
         }
     }
 
     private void saveSessions() {
-        if(isMES)
-        {
-            CONFIG_FILE = MES_CONFIG_FILE;
-        }
-        else {
-            CONFIG_FILE = TCS_CONFIG_FILE;
-        }
-        try (ObjectOutputStream oos = new ObjectOutputStream(new FileOutputStream(CONFIG_FILE))) {
-            oos.writeObject(sessionConfigs);
+        CONFIG_FILE = isMES ? MES_CONFIG_FILE : TCS_CONFIG_FILE;
+        try {
+            SessionStore.saveObject(new File(CONFIG_FILE), sessionConfigs);
         } catch (Exception ex) {
             JOptionPane.showMessageDialog(this, "保存会话失败: " + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
             ex.printStackTrace();
@@ -1231,6 +1249,25 @@ public class AixLogFinder extends JFrame {
         public String toString() {
             return user + "@" + host + ":" + port;
         }
+
+        /**
+         * 序列化时把密码替换成密文，写完再还原内存中的明文。
+         * 老版本写入的明文文件仍然可以读取（解密时自动识别）。
+         */
+        private void writeObject(ObjectOutputStream out) throws IOException {
+            String plain = password;
+            password = SessionCrypto.encrypt(plain);
+            try {
+                out.defaultWriteObject();
+            } finally {
+                password = plain;
+            }
+        }
+
+        private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {
+            in.defaultReadObject();
+            password = SessionCrypto.decrypt(password);
+        }
     }
 
     public void addSessionToModel(SessionConfig config) {
@@ -1263,9 +1300,7 @@ public class AixLogFinder extends JFrame {
     }
 
     private void terminateBackgroundThreads() {
-        filterTimer.cancel();
-        tcsFilterTimer.cancel();
-        // 终止其他自定义线程
+        filterExecutor.shutdownNow();
         runningProcesses.forEach(Process::destroyForcibly);
     }
 
@@ -1291,101 +1326,98 @@ public class AixLogFinder extends JFrame {
         }
     }
     private void tcsVisual() {
-        String tcsId = tcsIdField.getText().trim();
-        String sql = "";
-        DTCSX_EQP eqp = new DTCSX_EQP();
+        final String tcsId = tcsIdField.getText().trim();
 
         if (tcsId.isEmpty()) {
             JOptionPane.showMessageDialog(this, "请输入机台ID！", "提示", JOptionPane.WARNING_MESSAGE);
             return;
         }
 
-        switch (1) {
-            case 1: // Read DTCSX_EQP
-                sql = MessageFormat.format("SELECT * FROM TCSX.DTCSX_EQP where eqpid = ''{0}''", tcsId);
-                List<DTCSX_EQP> eqpList = executeQuery(sql, DTCSX_EQP.class);
-                if (!eqpList.isEmpty()) {
-                    eqp = eqpList.get(0);
-                    eqpStateField.setText(eqp.getMode().toString());
-                    eqpStatusDot.setText(eqp.getCtrlmode().startsWith("OFF") ?
-                            eqp.getCtrlmode() : eqp.getCtrlmode().toString().split("-")[1]);
-                    updateEQPStatusDot(eqp.getMode().startsWith("M"));
-                }
-               // break;
+        // 数据库查询放到后台线程，避免查询期间界面卡死
+        new Thread(() -> {
+            try {
+                List<DTCSX_EQP> eqpList = executeQuery(
+                        "SELECT * FROM TCSX.DTCSX_EQP WHERE EQPID = ?", DTCSX_EQP.class, tcsId);
+                List<DTCSX_PORT> portList = executeQuery(
+                        "SELECT * FROM TCSX.DTCSX_PORT WHERE EQPID = ?", DTCSX_PORT.class, tcsId);
 
-            case 2: // Read DTCSX_PORT
-                sql = MessageFormat.format("SELECT * FROM TCSX.DTCSX_PORT where eqpid = ''{0}''", tcsId);
-                List<DTCSX_PORT> portList = executeQuery(sql, DTCSX_PORT.class);
-
-                // 在EDT线程中更新UI
                 SwingUtilities.invokeLater(() -> {
-                    // 清空原有端口信息
-                    portInfoPanel.removeAll();
-                    portInfoPanel.setLayout(new GridBagLayout());
-                    GridBagConstraints gbc = new GridBagConstraints();
-                    gbc.insets = new Insets(2, 5, 2, 5);
-                    gbc.anchor = GridBagConstraints.WEST;
-                    gbc.fill = GridBagConstraints.HORIZONTAL;
-
-                    if (portList.isEmpty()) {
-                        // 显示无端口信息
-                        gbc.gridx = 0;
-                        gbc.gridy = 0;
-                        gbc.gridwidth = GridBagConstraints.REMAINDER;
-                        portInfoPanel.add(new JLabel("未查询到端口信息"), gbc);
-                    } else {
-                        // 添加表头
-                        gbc.gridy = 0;
-                        gbc.gridwidth = 1;
-                        gbc.weightx = 0.2;
-
-                        // 表头数组
-                        String[] headers = {"PortID", "Port类型", "Port状态", "片盒ID", "更新时间"};
-                        for (int i = 0; i < headers.length; i++) {
-                            gbc.gridx = i;
-                            portInfoPanel.add(createBoldLabel(headers[i]), gbc);
-                        }
-                        // 显示所有端口信息
-                        for (int i = 0; i < portList.size(); i++) {
-                            DTCSX_PORT port = portList.get(i);
-                            int row = i + 1;
-
-                            // PortID
-                            gbc.gridx = 0;
-                            gbc.gridy = row;
-                            portInfoPanel.add(new JLabel(port.getPortid()), gbc);
-
-                            // Port类型
-                            gbc.gridx = 1;
-                            portInfoPanel.add(new JLabel(port.getPorttype()), gbc);
-
-                            // Port状态
-                            gbc.gridx = 2;
-                            portInfoPanel.add(new JLabel(port.getState()), gbc);
-
-                            // 载体ID
-                            gbc.gridx = 3;
-                            portInfoPanel.add(new JLabel(port.getCarid()), gbc);
-
-                            // 状态更新时间
-                            gbc.gridx = 4;
-                            portInfoPanel.add(new JLabel(
-                                    port.getStateupdate() != null ?
-                                            port.getStateupdate().toString() : "未知"), gbc);
-                        }
-                    }
-
-                    // 设置面板可见并更新布局
-                    portInfoPanel.setVisible(true);
-                    portInfoPanel.revalidate();
-                    portInfoPanel.repaint();
+                    updateEqpInfo(eqpList.isEmpty() ? null : eqpList.get(0));
+                    renderPortInfo(portList);
                 });
+            } catch (DataAccessException ex) {
+                SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(
+                        this, "查询机台信息失败: " + ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE));
+            }
+        }, "tcs-visual").start();
+    }
 
-
-            case 3:
-                // 后续扩展
-                break;
+    private void updateEqpInfo(DTCSX_EQP eqp) {
+        if (eqp == null) {
+            return;
         }
+        String mode = eqp.getMode();
+        if (mode != null) {
+            eqpStateField.setText(mode);
+            updateEQPStatusDot(mode.startsWith("M"));
+        }
+
+        String ctrlMode = eqp.getCtrlmode();
+        if (ctrlMode != null) {
+            if (ctrlMode.startsWith("OFF")) {
+                eqpStatusDot.setText(ctrlMode);
+            } else {
+                String[] parts = ctrlMode.split("-");
+                eqpStatusDot.setText(parts.length > 1 ? parts[1] : ctrlMode);
+            }
+        }
+    }
+
+    private void renderPortInfo(List<DTCSX_PORT> portList) {
+        portInfoPanel.removeAll();
+        portInfoPanel.setLayout(new GridBagLayout());
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(2, 5, 2, 5);
+        gbc.anchor = GridBagConstraints.WEST;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+
+        if (portList.isEmpty()) {
+            gbc.gridx = 0;
+            gbc.gridy = 0;
+            gbc.gridwidth = GridBagConstraints.REMAINDER;
+            portInfoPanel.add(new JLabel("未查询到端口信息"), gbc);
+        } else {
+            gbc.gridy = 0;
+            gbc.gridwidth = 1;
+            gbc.weightx = 0.2;
+
+            String[] headers = {"PortID", "Port类型", "Port状态", "片盒ID", "更新时间"};
+            for (int i = 0; i < headers.length; i++) {
+                gbc.gridx = i;
+                portInfoPanel.add(createBoldLabel(headers[i]), gbc);
+            }
+
+            for (int i = 0; i < portList.size(); i++) {
+                DTCSX_PORT port = portList.get(i);
+                gbc.gridy = i + 1;
+
+                gbc.gridx = 0;
+                portInfoPanel.add(new JLabel(port.getPortid()), gbc);
+                gbc.gridx = 1;
+                portInfoPanel.add(new JLabel(port.getPorttype()), gbc);
+                gbc.gridx = 2;
+                portInfoPanel.add(new JLabel(port.getState()), gbc);
+                gbc.gridx = 3;
+                portInfoPanel.add(new JLabel(port.getCarid()), gbc);
+                gbc.gridx = 4;
+                portInfoPanel.add(new JLabel(port.getStateupdate() != null
+                        ? port.getStateupdate().toString() : "未知"), gbc);
+            }
+        }
+
+        portInfoPanel.setVisible(true);
+        portInfoPanel.revalidate();
+        portInfoPanel.repaint();
     }
 
     private void updateEQPStatusDot(boolean isTrue) {
